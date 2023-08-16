@@ -135,7 +135,7 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                 r = torch.rand(1)
                 j = x[:, prefix_len + i]
                 
-                if r < torch.min(torch.tensor([1]), q[:, prefix_len + i - 1, j] / p[:, prefix_len + i - 1, j]):
+                if r < torch.min(torch.tensor([1]), p[:, prefix_len + i - 1, j] / q[:, prefix_len + i - 1, j]):
                     # accept, and update n
                     n += 1
                 else:
@@ -162,6 +162,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
                          temperature : float = 1, top_k : int = 0, top_p : float = 0) -> torch.Tensor:
     """
     Google version Speculative Sampling.
+    
     Args:
         x (torch.Tensor): input sequence, (batch, prefix_seqlen), Note that the batch dim is always 1 now.
         approx_model (torch.nn.Module): approx model, the small one
@@ -204,6 +205,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
                 j = x[:, prefix_len + i]
                 
                 if r > (p[:, prefix_len + i - 1, j]) / (q[:, prefix_len + i - 1, j]):
+                    # reject
                     n = prefix_len + i - 1
                     break
             
