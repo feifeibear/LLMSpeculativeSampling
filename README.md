@@ -35,5 +35,5 @@ python sample.py --input "The quick brown fox jumps over the lazy " --target_mod
 }
 ```
 
-## Note
+## Notations
 This repo is built for demostration purpose. Other optimizations such as batching and KV Caching are not included which are essential for efficiency.
