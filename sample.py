@@ -232,12 +232,15 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
 
 def generate(input_text, approx_model_name, target_model_name, num_tokens=20):
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
+    
+    torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
     tokenizer = AutoTokenizer.from_pretrained(approx_model_name)
     
-    small_model = AutoModelForCausalLM.from_pretrained(approx_model_name)
-    large_model = AutoModelForCausalLM.from_pretrained(target_model_name)
-    
-    input_ids = tokenizer.encode(input_text, return_tensors='pt')
+    small_model = AutoModelForCausalLM.from_pretrained(approx_model_name).to(torch_device)
+    large_model = AutoModelForCausalLM.from_pretrained(target_model_name).to(torch_device)
+
+    input_ids = tokenizer.encode(input_text, return_tensors='pt').to(torch_device)
 
     
     torch.manual_seed(123)
