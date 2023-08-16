@@ -91,8 +91,8 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
         x (torch.Tensor): input sequence, (batch, prefix_seqlen), Note that the batch dim is always 1 now.
         approx_model (torch.nn.Module): approx model, the small one
         target_model (torch.nn.Module): target model, the large one
-        N (int): the overall max generated tokens number.
-        K (int): $\gamma$, the token number small model guesses.
+        max_len (int): the max overall generated tokens number.
+        gamma (int): $\gamma$, the token number small model guesses.
         temperature (float, optional): Defaults to 1.
         top_k (int, optional): Defaults to 0.
         top_p (float, optional): Defaults to 0.
@@ -127,7 +127,6 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             for i in range(gamma):
                 r = torch.rand(1)
                 j = x[:, prefix_len + i]
-                # print(f"sum on {prefix_len + i - 1}: {torch.sum(p[:, prefix_len + i - 1, :])}, {torch.sum(q[:, prefix_len + i - 1, :])}")
                 
                 if r > (p[:, prefix_len + i - 1, j]) / (q[:, prefix_len + i - 1, j]):
                     n = prefix_len + i - 1
@@ -140,7 +139,6 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             
             if n < prefix_len + gamma - 1:
                 # reject someone, sample from the pos n
-                # print(f"sum on {n}: {torch.sum(p[:, n, :])}, {torch.sum(q[:, n, :])}")
                 t = sample(max_fn(p[:, n, :] - q[:, n, :]), 
                            temperature, top_k, top_p)
                 # print(f"reject and sample {n}")
@@ -156,7 +154,6 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
     return prefix
 
 def generate(input_text, approx_model_name, target_model_name, num_tokens=20):
-
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
     tokenizer = AutoTokenizer.from_pretrained(approx_model_name)
     
