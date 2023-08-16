@@ -135,7 +135,7 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                 r = torch.rand(1)
                 j = x[:, prefix_len + i]
                 
-                if r < torch.min(1, q[:, prefix_len + i - 1, j] / p[:, prefix_len + i - 1, j]):
+                if r < torch.min(torch.tensor([1]), q[:, prefix_len + i - 1, j] / p[:, prefix_len + i - 1, j]):
                     # accept, and update n
                     n += 1
                 else:
@@ -252,7 +252,12 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20):
     torch.manual_seed(123)
     output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = 10)
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    print(f"autoregressive_sampling: {generated_text}")
+    print(f"large (target) model autoregressive_sampling: {generated_text}")
+
+    torch.manual_seed(123)
+    output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = 10)
+    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    print(f"small (approx) model autoregressive_sampling: {generated_text}")
 
 
 if __name__ == "__main__":
