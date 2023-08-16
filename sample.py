@@ -290,7 +290,6 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ve
     # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
     # print(f"small (approx) model autoregressive_sampling: {generated_text}")
 
-
 if __name__ == "__main__":
     args = parse_arguments()
     generate(args.input, args.approx_model_name, args.target_model_name, verbose=args.verbose)
