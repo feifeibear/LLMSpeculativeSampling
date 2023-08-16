@@ -132,10 +132,10 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
             is_all_accept = True
             n = prefix_len - 1
             for i in range(gamma):
-                r = torch.rand(1)
+                r = torch.rand(1, device = p.device)
                 j = x[:, prefix_len + i]
                 
-                if r < torch.min(torch.tensor([1]), p[:, prefix_len + i - 1, j] / q[:, prefix_len + i - 1, j]):
+                if r < torch.min(torch.tensor([1], device=q.device), p[:, prefix_len + i - 1, j] / q[:, prefix_len + i - 1, j]):
                     # accept, and update n
                     n += 1
                 else:
@@ -181,6 +181,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
     
     assert prefix.shape[0] == 1, "input batch size must be 1"
 
+    assert approx_model.device == target_model.device
     with tqdm(total=T, desc="speculative sampling") as pbar:
         while prefix.shape[1] < T:
             # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
@@ -201,7 +202,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             # x = x_[:prefix_len-1] + x_0, ... x_(gamma-1)
             n = prefix_len + gamma - 1
             for i in range(gamma):
-                r = torch.rand(1)
+                r = torch.rand(1, device = p.device)
                 j = x[:, prefix_len + i]
                 
                 if r > (p[:, prefix_len + i - 1, j]) / (q[:, prefix_len + i - 1, j]):
