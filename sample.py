@@ -83,10 +83,85 @@ def norm_logits(p : torch.Tensor):
     """
     return F.softmax(p, dim=-1)
 
+def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
+                         max_len : int , gamma : int = 4,
+                         temperature : float = 1, top_k : int = 0, top_p : float = 0) -> torch.Tensor:
+    """
+    DeepMind version Speculative Sampling.
+    Accelerating Large Language Model Decoding with Speculative Sampling
+    https://arxiv.org/abs/2302.01318
+    
+    
+    Args:
+        x (torch.Tensor): input sequence, (batch, prefix_seqlen), Note that the batch dim is always 1 now.
+        approx_model (torch.nn.Module): approx model, the small one
+        target_model (torch.nn.Module): target model, the large one
+        max_len (int): the max overall generated tokens number.
+        gamma (int): $\gamma$, the token number small model guesses.
+        temperature (float, optional): Defaults to 1.
+        top_k (int, optional): Defaults to 0.
+        top_p (float, optional): Defaults to 0.
+
+    Returns:
+        torch.Tensor: generated tokens (batch, target_seqlen)
+    """
+    seq_len = prefix.shape[1]
+    T = seq_len + max_len
+    
+    assert prefix.shape[0] == 1, "input batch size must be 1"
+
+    with tqdm(total=T, desc="speculative sampling") as pbar:
+        while prefix.shape[1] < T:
+            # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
+            x = prefix
+            prefix_len = prefix.shape[1]
+            for _ in range(gamma):
+                # p.logits shape (batch, seq, vocab)
+                q = approx_model(x).logits
+                next_tok = sample(q[:, -1, :], 
+                                  temperature, top_k, top_p)
+                x = torch.cat((x, next_tok), dim=1)
+
+            q = norm_logits(q)
+            # p  = M_p[prefix + x_0, x_0, .., x_(gamma-1)]
+            p = norm_logits(target_model(x).logits)
+
+            # n the end position of the valid prefix
+            # x = x_[:prefix_len-1] + x_0, ... x_(gamma-1)
+            
+            is_all_accept = True
+            n = prefix_len - 1
+            for i in range(gamma):
+                r = torch.rand(1)
+                j = x[:, prefix_len + i]
+                
+                if r < torch.min(1, q[:, prefix_len + i - 1, j] / p[:, prefix_len + i - 1, j]):
+                    # accept, and update n
+                    n += 1
+                else:
+                    # reject
+                    t = sample(max_fn(p[:, n, :] - q[:, n, :]), 
+                           temperature, top_k, top_p)
+                    is_all_accept = False
+                    break
+         
+            prefix = x[:, :n + 1]
+            
+            if is_all_accept:
+                t = sample(p[:, -1, :], 
+                           temperature, top_k, top_p)
+            
+            prefix = torch.cat((prefix, t), dim=1)
+            pbar.update(n - pbar.n)
+
+    return prefix
+
+
 def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
                          max_len : int , gamma : int = 4,
                          temperature : float = 1, top_k : int = 0, top_p : float = 0) -> torch.Tensor:
     """
+    Google version Speculative Sampling.
     Args:
         x (torch.Tensor): input sequence, (batch, prefix_seqlen), Note that the batch dim is always 1 now.
         approx_model (torch.nn.Module): approx model, the small one
@@ -166,7 +241,12 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20):
     torch.manual_seed(123)
     output = speculative_sampling(input_ids, small_model, large_model, num_tokens, top_k = 10)
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    print(f"speculative_sampling: {generated_text}")
+    print(f"google's speculative_sampling: {generated_text}")
+
+    torch.manual_seed(123)
+    output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = 10)
+    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    print(f"deepmind's speculative_sampling: {generated_text}")
 
 
     torch.manual_seed(123)
