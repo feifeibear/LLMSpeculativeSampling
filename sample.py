@@ -4,13 +4,25 @@ import torch
 from torch.nn import functional as F
 import argparse
 
+
+class Decoder:
+    def __init__(self, tokenizer) -> None:
+        self.tokenizer = tokenizer
+    
+    def decode(self, t : torch.Tensor) -> str:
+        # assert t.dim == 2, "t must be 2d tensor"
+        return self.tokenizer.decode(t[0], skip_special_tokens=True)
+
+DECODER : Decoder = None    
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description='args for sample.py')
 
-    parser.add_argument('--input', type=str, default="A dog has four ")
+    parser.add_argument('--input', type=str, default="A dog has four")
     parser.add_argument('--approx_model_name', type=str, default="/share_nfs/fangjiarui/root/code/hf_models/bloom-560m")
     parser.add_argument('--target_model_name', type=str, default="/share_nfs/fangjiarui/root/code/hf_models/bloomz-7b1")
-
+    parser.add_argument('--verbose', '-v', action='store_true', default=False, help='enable verbose mode')
     args = parser.parse_args()
     return args
 
@@ -159,7 +171,7 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
 
 def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
                          max_len : int , gamma : int = 4,
-                         temperature : float = 1, top_k : int = 0, top_p : float = 0) -> torch.Tensor:
+                         temperature : float = 1, top_k : int = 0, top_p : float = 0, verbose : bool = False) -> torch.Tensor:
     """
     Google version Speculative Sampling.
     
@@ -182,6 +194,10 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
     assert prefix.shape[0] == 1, "input batch size must be 1"
 
     assert approx_model.device == target_model.device
+    
+    if verbose:
+        global DECODER
+    
     with tqdm(total=T, desc="speculative sampling") as pbar:
         while prefix.shape[1] < T:
             # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
@@ -209,7 +225,9 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
                     # reject
                     n = prefix_len + i - 1
                     break
-            
+                
+                if verbose:
+                    print(f"approx guess accepted {j[0]}: \033[31m{DECODER.decode(torch.tensor([j]))}\033[0m")
             
             # print(f"n : {n}, i : {i}, prefix_len + gamma - 1: {prefix_len + gamma - 1}")
             assert n >= prefix_len - 1, f"n {n}, prefix_len {prefix_len}"
@@ -219,24 +237,31 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
                 # reject someone, sample from the pos n
                 t = sample(max_fn(p[:, n, :] - q[:, n, :]), 
                            temperature, top_k, top_p)
-                # print(f"reject and sample {n}")
+                if verbose:
+                    print(f"target resamples {n}: \033[34m{DECODER.decode(t)}\033[0m")
             else:
-                # all draft model decoding accepted
+                # all approx model decoding accepted
                 assert n == p.shape[1] - 1
                 t = sample(p[:, -1, :], 
                            temperature, top_k, top_p)
-            
+                if verbose:
+                    print(f"target samples {n}: \033[35m{DECODER.decode(t)}\033[0m")
+                
             prefix = torch.cat((prefix, t), dim=1)
-            pbar.update(n - pbar.n)
+            if not verbose:
+                pbar.update(n - pbar.n)
 
     return prefix
 
-def generate(input_text, approx_model_name, target_model_name, num_tokens=20):
+def generate(input_text, approx_model_name, target_model_name, num_tokens=20, verbose = False):
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
     
     torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     tokenizer = AutoTokenizer.from_pretrained(approx_model_name)
+    
+    global DECODER
+    DECODER = Decoder(tokenizer)
     
     small_model = AutoModelForCausalLM.from_pretrained(approx_model_name).to(torch_device)
     large_model = AutoModelForCausalLM.from_pretrained(target_model_name).to(torch_device)
@@ -245,29 +270,29 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20):
 
     
     torch.manual_seed(123)
-    output = speculative_sampling(input_ids, small_model, large_model, num_tokens, top_k = 10)
+    output = speculative_sampling(input_ids, small_model, large_model, num_tokens, top_k = 10, verbose = verbose)
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
     print(f"google's speculative_sampling: {generated_text}")
 
-    torch.manual_seed(123)
-    output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = 10)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    print(f"deepmind's speculative_sampling: {generated_text}")
+    # torch.manual_seed(123)
+    # output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = 10)
+    # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    # print(f"deepmind's speculative_sampling: {generated_text}")
 
 
-    torch.manual_seed(123)
-    output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = 10)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    print(f"large (target) model autoregressive_sampling: {generated_text}")
+    # torch.manual_seed(123)
+    # output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = 10)
+    # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    # print(f"large (target) model autoregressive_sampling: {generated_text}")
 
-    torch.manual_seed(123)
-    output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = 10)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    print(f"small (approx) model autoregressive_sampling: {generated_text}")
+    # torch.manual_seed(123)
+    # output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = 10)
+    # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    # print(f"small (approx) model autoregressive_sampling: {generated_text}")
 
 
 if __name__ == "__main__":
     args = parse_arguments()
-    generate(args.input, args.approx_model_name, args.target_model_name)
+    generate(args.input, args.approx_model_name, args.target_model_name, verbose=args.verbose)
 
     
