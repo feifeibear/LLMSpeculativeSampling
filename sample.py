@@ -27,7 +27,17 @@ def parse_arguments():
     return args
 
 # copy from https://github.com/LeeSinLiang/microGPT/blob/ed40cf9780dbeb180adfe94c227d4aa97e69250e/gpt.py
-def top_k_top_p_filter(logits, top_k: int = 0, top_p: float = 0.0):
+def top_k_top_p_filter(logits: torch.Tensor, top_k: int = 0, top_p: float = 0.0):
+    """
+
+    Args:
+        logits (torch.Tensorpe_): 2D tensor with shape (batch, vocab)
+        top_k (int, optional): top_k. Defaults to 0.
+        top_p (float, optional): top_p. Defaults to 0.0.
+
+    Returns:
+        torch.Tensor: a renormalized logits
+    """
     if top_k > 0:
         filter = torch.topk(logits, min(top_k, logits.size(-1)))[0]
         logits[logits < filter[:, [-1]]] = float('-inf')
@@ -300,10 +310,10 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ve
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
     print(f"large (target) model autoregressive_sampling: {generated_text}")
 
-    # torch.manual_seed(123)
-    # output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
-    # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    # print(f"small (approx) model autoregressive_sampling: {generated_text}")
+    torch.manual_seed(123)
+    output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
+    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    print(f"small (approx) model autoregressive_sampling: {generated_text}")
 
 if __name__ == "__main__":
     args = parse_arguments()
