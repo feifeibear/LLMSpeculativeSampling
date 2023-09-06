@@ -82,9 +82,12 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int,
     n = len(x)
     T = len(x) + N
 
+    past_key_values = None
     with tqdm(total=N, desc="autoregressive sampling") as pbar:
         while n < T:
-            logits = model(x).logits[::, -1, :]
+            outputs = model(x, past_key_values = past_key_values)
+            logits = outputs.logits[::, -1, :]
+            past_key_values = outputs.past_key_values
             idx_next = sample(norm_logits(logits, temperature, top_k, top_p))
             x = torch.cat((x, idx_next), dim=1)
             n += 1
