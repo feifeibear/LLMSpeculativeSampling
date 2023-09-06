@@ -3,7 +3,7 @@ from tqdm import tqdm
 import torch
 from torch.nn import functional as F
 import argparse
-
+from typing import Tuple
 
 class Decoder:
     def __init__(self, tokenizer) -> None:
@@ -108,6 +108,38 @@ def max_fn(x):
 #     """
 #     return F.softmax(p, dim=-1)
 
+def _approx_model_serial_forward(prefix : torch.Tensor, gamma : int, approx_model : torch.nn.Module,
+                                temperature : float, top_k : float, top_p : float) -> Tuple[torch.Tensor, torch.Tensor]:
+    """ forward approx model gamma times
+
+    Args:
+        prefix (torch.Tensor): the prefix
+        gamma (int): how many times approx guesses
+        approx_model (torch.nn.Module): an approx model
+        temperature (float): temp for sampling
+        top_k (float): top_k for sampling
+        top_p (float): top_p for sampling
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: prefix+generated tokens, probability distribution of approx model's output
+    """
+    past_key_values = None
+    x = prefix
+    for _ in range(gamma):
+        # p.logits shape (batch, seq, vocab)
+        output = approx_model(x, past_key_values = past_key_values)
+        q = output.logits
+        past_key_values = output.past_key_values
+        next_tok = sample(norm_logits(q[:, -1, :], 
+                        temperature, top_k, top_p))
+        x = torch.cat((x, next_tok), dim=1)
+    
+    # normalize the logits
+    for i in range(q.shape[1]):
+        q[:,i,:] = norm_logits(q[:,i,:],
+                        temperature, top_k, top_p)
+    return x, q
+
 def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
                          max_len : int , gamma : int = 4,
                          temperature : float = 1, top_k : int = 0, top_p : float = 0) -> torch.Tensor:
@@ -138,19 +170,9 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
     with tqdm(total=T, desc="speculative sampling") as pbar:
         while prefix.shape[1] < T:
             # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
-            x = prefix
             prefix_len = prefix.shape[1]
-            for _ in range(gamma):
-                # p.logits shape (batch, seq, vocab)
-                q = approx_model(x).logits
-                next_tok = sample(norm_logits(q[:, -1, :], 
-                                  temperature, top_k, top_p))
-                x = torch.cat((x, next_tok), dim=1)
-
-            # normalize the logits
-            for i in range(q.shape[1]):
-                q[:,i,:] = norm_logits(q[:,i,:],
-                                temperature, top_k, top_p)
+            x, q = _approx_model_serial_forward(prefix, gamma, approx_model, temperature, top_k, top_p)
+            
             # p  = M_p[prefix + x_0, x_0, .., x_(gamma-1)]
             p = target_model(x).logits
             for i in range(p.shape[1]):
@@ -218,20 +240,9 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
     with tqdm(total=T, desc="speculative sampling") as pbar:
         while prefix.shape[1] < T:
             # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
-            x = prefix
             prefix_len = prefix.shape[1]
-            for _ in range(gamma):
-                # p.logits shape (batch, seq, vocab)
-                q = approx_model(x).logits
-                next_tok = sample(norm_logits(q[:, -1, :], 
-                                  temperature, top_k, top_p))
-                x = torch.cat((x, next_tok), dim=1)
 
-
-            # normalize the logits
-            for i in range(q.shape[1]):
-                q[:,i,:] = norm_logits(q[:,i,:],
-                                temperature, top_k, top_p)
+            x, q = _approx_model_serial_forward(prefix, gamma, approx_model, temperature, top_k, top_p)
             
             # p  = M_p[prefix + x_0, x_0, .., x_(gamma-1)]
             p = target_model(x).logits
@@ -287,9 +298,11 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ve
     global DECODER
     DECODER = Decoder(tokenizer)
     
+    print("begin loading models")
     small_model = AutoModelForCausalLM.from_pretrained(approx_model_name).to(torch_device)
     large_model = AutoModelForCausalLM.from_pretrained(target_model_name).to(torch_device)
-
+    print("fini loading models")
+    
     input_ids = tokenizer.encode(input_text, return_tensors='pt').to(torch_device)
 
     top_k = 10
@@ -299,10 +312,10 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ve
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
     print(f"google's speculative_sampling: {generated_text}")
 
-    # torch.manual_seed(123)
-    # output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, )
-    # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    # print(f"deepmind's speculative_sampling: {generated_text}")
+    torch.manual_seed(123)
+    output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, )
+    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    print(f"deepmind's speculative_sampling: {generated_text}")
 
 
     torch.manual_seed(123)
