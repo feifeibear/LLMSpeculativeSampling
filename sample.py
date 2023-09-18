@@ -240,6 +240,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
     if verbose:
         global DECODER
     
+    target_model_past_key_values = None
     with tqdm(total=T, desc="speculative sampling") as pbar:
         while prefix.shape[1] < T:
             # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
@@ -248,7 +249,10 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             x, q = _approx_model_serial_forward(prefix, gamma, approx_model, temperature, top_k, top_p)
             
             # p  = M_p[prefix + x_0, x_0, .., x_(gamma-1)]
-            p = target_model(x).logits
+            target_model_outputs = target_model(x, past_key_values = target_model_past_key_values)
+            target_model_past_key_values = target_model_outputs.past_key_values
+            p = target_model_outputs.logits
+            
             for i in range(p.shape[1]):
                 p[:,i,:] = norm_logits(p[:,i,:],
                                 temperature, top_k, top_p)
@@ -304,7 +308,7 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ve
     print("begin loading models")
     small_model = AutoModelForCausalLM.from_pretrained(approx_model_name).to(torch_device)
     large_model = AutoModelForCausalLM.from_pretrained(target_model_name).to(torch_device)
-    print("fini loading models")
+    print("finish loading models")
     
     input_ids = tokenizer.encode(input_text, return_tensors='pt').to(torch_device)
 
