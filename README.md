@@ -8,6 +8,11 @@ Therefore, it decodes by running the target model in parallel on the outputs of 
 
 The speculative sampling is proposed by Google and Deepmind independently. So I implement two slightly different versions of speculative sampling: [Google's](https://arxiv.org/abs/2211.17192) and [Deepmind's](https://arxiv.org/abs/2302.01318).
 
+## Update Logs
+
+2023.09.19 Add KVCache Optimization to the Google's version.
+
+2023.08.16 First release, implement the paper's algorithm.
 
 ## Usage
 In the sample, I use [bloomz-7b1](https://huggingface.co/bigscience/bloomz-7b1/tree/main) as the target model, [bloom-560m](https://huggingface.co/bigscience/bloom-560m/tree/main) as the approximation model.
