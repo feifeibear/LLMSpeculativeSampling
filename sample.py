@@ -102,7 +102,7 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                 # p.logits shape (batch, seq, vocab)
                 q = approx_model(x).logits
                 next_tok = sample(norm_logits(q[:, -1, :], 
-                                  temperature, top_k, top_p), random_seed)
+                                  temperature, top_k, top_p), random_seed = random_seed)
                 x = torch.cat((x, next_tok), dim=1)
             
             # normalize the logits
@@ -129,14 +129,14 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                     n += 1
                 else:
                     # reject
-                    t = sample(max_fn(p[:, n, :] - q[:, n, :]), random_seed)
+                    t = sample(max_fn(p[:, n, :] - q[:, n, :]), random_seed = random_seed)
                     is_all_accept = False
                     break
          
             prefix = x[:, :n + 1]
             
             if is_all_accept:
-                t = sample(p[:, -1, :], random_seed)
+                t = sample(p[:, -1, :], random_seed = random_seed)
             
             prefix = torch.cat((prefix, t), dim=1)
             pbar.update(n - pbar.n)
