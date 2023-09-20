@@ -14,7 +14,7 @@ class KVCacheModel():
     def __init__(self, model : torch.nn.Module, temperature : float = 1, top_k : int = 0, top_p : float = 0, random_seed : Optional[int] = None) -> None:
         self._model = model
         self._past_key_values = None
-        self._prob_list = None
+        self._prob_history = None
 
         self._temperature = temperature
         self._top_k = top_k
@@ -23,14 +23,14 @@ class KVCacheModel():
 
     def _forward_with_kvcache(self, input_ids : torch.Tensor, use_debug = True) -> torch.Tensor:
         if self._past_key_values is None:
-            assert self._prob_list is None, f"{self._prob_list.shape}"
+            assert self._prob_history is None, f"{self._prob_history.shape}"
             # the first forward returns the prompt's logits
             outputs = self._model(input_ids)
-            self._prob_list = outputs.logits
-            for i in range(self._prob_list.shape[-2]):   
-                self._prob_list[:, i, :] = norm_logits(self._prob_list[:, i, :], self._temperature, self._top_k, self._top_p)
+            self._prob_history = outputs.logits
+            for i in range(self._prob_history.shape[-2]):   
+                self._prob_history[:, i, :] = norm_logits(self._prob_history[:, i, :], self._temperature, self._top_k, self._top_p)
             self._past_key_values = outputs.past_key_values
-            last_q = self._prob_list[:, -1, :]
+            last_q = self._prob_history[:, -1, :]
         else:
             # return the last token's logits
             cached_len = 0
@@ -55,7 +55,7 @@ class KVCacheModel():
             for i in range(not_cached_q.shape[-2]):   
                 not_cached_q[:, i, :] = norm_logits(not_cached_q[:, i, :], self._temperature, self._top_k, self._top_p)    
                 
-            self._prob_list = torch.cat([self._prob_list, not_cached_q], dim=1)
+            self._prob_history = torch.cat([self._prob_history, not_cached_q], dim=1)
             
             last_q = not_cached_q[:, -1, :]
             self._past_key_values = outputs.past_key_values
@@ -102,5 +102,5 @@ class KVCacheModel():
             past_key_values_trimmed.append(kv_trimmed)
         
         self._past_key_values = past_key_values_trimmed
-        self._prob_list = self._prob_list[:, :end_pos, :]
+        self._prob_history = self._prob_history[:, :end_pos, :]
 

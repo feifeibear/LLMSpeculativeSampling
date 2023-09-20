@@ -26,6 +26,7 @@ def parse_arguments():
     parser.add_argument('--approx_model_name', type=str, default="/share_nfs/fangjiarui/root/code/hf_models/bloom-560m")
     parser.add_argument('--target_model_name', type=str, default="/share_nfs/fangjiarui/root/code/hf_models/bloomz-7b1")
     parser.add_argument('--verbose', '-v', action='store_true', default=False, help='enable verbose mode')
+    parser.add_argument('--seed', '-s', type=int, default=None, help='set a random seed')
     args = parser.parse_args()
     return args
 
@@ -102,7 +103,7 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                 # p.logits shape (batch, seq, vocab)
                 q = approx_model(x).logits
                 next_tok = sample(norm_logits(q[:, -1, :], 
-                                  temperature, top_k, top_p), random_seed)
+                                  temperature, top_k, top_p), random_seed = random_seed)
                 x = torch.cat((x, next_tok), dim=1)
             
             # normalize the logits
@@ -129,14 +130,14 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                     n += 1
                 else:
                     # reject
-                    t = sample(max_fn(p[:, n, :] - q[:, n, :]), random_seed)
+                    t = sample(max_fn(p[:, n, :] - q[:, n, :]), random_seed = random_seed)
                     is_all_accept = False
                     break
          
             prefix = x[:, :n + 1]
             
             if is_all_accept:
-                t = sample(p[:, -1, :], random_seed)
+                t = sample(p[:, -1, :], random_seed = random_seed)
             
             prefix = torch.cat((prefix, t), dim=1)
             pbar.update(n - pbar.n)
@@ -195,7 +196,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
                 r = torch.rand(1, device = device)
                 j = x[:, prefix_len + i]
                 
-                if r > (target_model_cache._prob_list[:, prefix_len + i - 1, j]) / (approx_model_cache._prob_list[:, prefix_len + i - 1, j]):
+                if r > (target_model_cache._prob_history[:, prefix_len + i - 1, j]) / (approx_model_cache._prob_history[:, prefix_len + i - 1, j]):
                     # reject
                     n = prefix_len + i - 1
                     break
@@ -209,19 +210,19 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             
             approx_model_cache.rollback(n+1)
             
-            assert approx_model_cache._prob_list.shape[-2] <= n + 1, f"approx_model prob list shape {approx_model_cache._prob_list.shape}, n {n}"
+            assert approx_model_cache._prob_history.shape[-2] <= n + 1, f"approx_model prob list shape {approx_model_cache._prob_history.shape}, n {n}"
             
             if n < prefix_len + gamma - 1:
                 # reject someone, sample from the pos n
-                t = sample(max_fn(target_model_cache._prob_list[:, n, :] - approx_model_cache._prob_list[:, n, :]), random_seed=random_seed)
+                t = sample(max_fn(target_model_cache._prob_history[:, n, :] - approx_model_cache._prob_history[:, n, :]), random_seed=random_seed)
                 if verbose:
                     print(f"target resamples at position {n}: \033[34m{DECODER.decode(t)}\033[0m")
                 
                 target_model_cache.rollback(n+1)
             else:
                 # all approx model decoding accepted
-                assert n == target_model_cache._prob_list.shape[1] - 1
-                t = sample(target_model_cache._prob_list[:, -1, :], random_seed=random_seed)
+                assert n == target_model_cache._prob_history.shape[1] - 1
+                t = sample(target_model_cache._prob_history[:, -1, :], random_seed=random_seed)
                 if verbose:
                     print(f"target samples {n}: \033[35m{DECODER.decode(t)}\033[0m")
                 target_model_cache.rollback(n+2)
@@ -234,7 +235,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
 
     return prefix
 
-def generate(input_text, approx_model_name, target_model_name, num_tokens=40, verbose = False):
+def generate(input_text, approx_model_name, target_model_name, num_tokens=40, random_seed = None, verbose = False):
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
     
     torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -276,6 +277,6 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ve
 
 if __name__ == "__main__":
     args = parse_arguments()
-    generate(args.input, args.approx_model_name, args.target_model_name, verbose=args.verbose)
+    generate(args.input, args.approx_model_name, args.target_model_name, args.seed, verbose=args.verbose)
 
     
