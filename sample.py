@@ -86,46 +86,6 @@ def _debug_show_kvcache(past_key_values):
         k, v = elem
         print(f"kv cache: k shape {k.shape}, v shape {v.shape}")
         break
-   
-def forward_with_kvcache(model, input_ids, past_key_values, cached_q, temperature, top_k, top_p, use_debug = False):
-    if past_key_values is None:
-        assert cached_q is None
-        # the first forward returns the prompt's logits
-        outputs = model(input_ids)
-        cached_q = outputs.logits
-        for i in range(cached_q.shape[-2]):   
-            cached_q[:, i, :] = norm_logits(cached_q[:, i, :], temperature, top_k, top_p)
-        last_q = cached_q[:, -1, :]
-    else:
-        # return the last token's logits
-        cached_len = 0
-        for kv in past_key_values:
-            k, v = kv
-            cached_len = k.shape[2]
-            
-        last_input_id = input_ids[:, cached_len:]
-        if last_input_id.dim() == 1:
-            last_input_id = torch.unsqueeze(last_input_id, 0)
-        
-        if use_debug:
-            print(f"last_input_id shape {last_input_id.shape}")
-            _debug_show_kvcache(past_key_values)
-        
-        outputs = model(last_input_id, past_key_values=past_key_values, use_cache=True)
-        
-        not_cached_q = outputs.logits
-        if not_cached_q.dim() == 2:
-            not_cached_q = torch.unsqueeze(not_cached_q, 0)
-            
-        for i in range(not_cached_q.shape[-2]):   
-            not_cached_q[:, i, :] = norm_logits(not_cached_q[:, i, :], temperature, top_k, top_p)    
-            
-        if cached_q is not None:
-            cached_q = torch.cat([cached_q, not_cached_q], dim=1)
-        last_q = not_cached_q[:, -1, :]
-    
-    return last_q, outputs.past_key_values, cached_q
-
 
 class KVCacheModel():
     def __init__(self, model, temperature : float = 1, top_k : int = 0, top_p : float = 0) -> None:
@@ -137,14 +97,15 @@ class KVCacheModel():
         self._top_k = top_k
         self._top_p = top_p
 
-    def _forward_with_kvcache(self, input_ids, use_debug = False):
+    def _forward_with_kvcache(self, input_ids : torch.Tensor, use_debug = False) -> torch.Tensor:
         if self._past_key_values is None:
-            assert self._prob_list is None
+            assert self._prob_list is None, f"{self._prob_list.shape}"
             # the first forward returns the prompt's logits
             outputs = self._model(input_ids)
             self._prob_list = outputs.logits
             for i in range(self._prob_list.shape[-2]):   
                 self._prob_list[:, i, :] = norm_logits(self._prob_list[:, i, :], self._temperature, self._top_k, self._top_p)
+            self._past_key_values = outputs.past_key_values
             last_q = self._prob_list[:, -1, :]
         else:
             # return the last token's logits
@@ -170,16 +131,17 @@ class KVCacheModel():
             for i in range(not_cached_q.shape[-2]):   
                 not_cached_q[:, i, :] = norm_logits(not_cached_q[:, i, :], self._temperature, self._top_k, self._top_p)    
                 
-            if self._prob_list is not None:
-                self._prob_list = torch.cat([self._prob_list, not_cached_q], dim=1)
+            self._prob_list = torch.cat([self._prob_list, not_cached_q], dim=1)
+            
             last_q = not_cached_q[:, -1, :]
+            self._past_key_values = outputs.past_key_values
         
         return last_q
 
 
     def _generate_with_kvcache(self, prefix : torch.Tensor, 
                                     gamma : int, 
-                                    use_debug = False) -> Tuple[torch.Tensor, torch.Tensor, Tuple[Tuple[torch.Tensor, torch.Tensor]]]:
+                                    use_debug = False) -> torch.Tensor:
         """ forward the model gamma times
 
         Args:
@@ -187,20 +149,22 @@ class KVCacheModel():
             gamma (int): how many times approx guesses
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor, Tuple]: prefix+generated tokens, past key value cache, probability distribution of vocab on the all of the tokens
+            Torch.Tensor: prefix+generated tokens
         """
         x = prefix
 
         for _ in range(gamma):
-            q, self._past_key_values, self._prob_list = self._forward_with_kvcache(self._model, x, use_debug)
+            q = self._forward_with_kvcache(x, use_debug)
             next_tok = sample(q)
             x = torch.cat((x, next_tok), dim=1)
         return x
 
+    @torch.no_grad()
     def generate(self, input : torch.Tensor, gamma : int) -> torch.Tensor:
-        output = self._generate_with_kvcache(input, gamma, self._model)
+        output = self._generate_with_kvcache(input, gamma)
         return output
     
+    @torch.no_grad()
     def rollback(self, end_pos : int):
         past_key_values_trimmed = []
         for kv in self._past_key_values:
@@ -216,7 +180,6 @@ class KVCacheModel():
         self._prob_list = self._prob_list[:, :end_pos, :]
 
 
-
 @torch.no_grad()
 def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int, 
                             temperature : float = 1, top_k : int = 0, top_p : float = 0):
@@ -227,10 +190,16 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int,
     with tqdm(total=N, desc="autoregressive sampling") as pbar:
         while n < T:
             # outputs = model(x)
-            last_q, past_key_values, _ = forward_with_kvcache(model, x, past_key_values, None, temperature, top_k, top_p)
-            # logits = outputs.logits[::, -1, :]
-            # past_key_values = outputs.past_key_values
-            idx_next = sample(last_q)
+            if past_key_values:
+                last_ids = x[:, -1]
+                if last_ids.dim() == 1:
+                    last_ids = torch.unsqueeze(last_ids, 0)
+                outputs = model(last_ids, past_key_values = past_key_values, use_cache = True)
+            else:
+                outputs = model(x)
+            last_p = norm_logits(outputs.logits[::, -1, :], temperature, top_k, top_p)
+            past_key_values = outputs.past_key_values
+            idx_next = sample(last_p)
             x = torch.cat((x, idx_next), dim=1)
             n += 1
             pbar.update(1)
