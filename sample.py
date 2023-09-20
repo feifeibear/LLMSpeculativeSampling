@@ -68,7 +68,7 @@ def max_fn(x):
 @torch.no_grad()
 def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
                          max_len : int , gamma : int = 4,
-                         temperature : float = 1, top_k : int = 0, top_p : float = 0) -> torch.Tensor:
+                         temperature : float = 1, top_k : int = 0, top_p : float = 0, random_seed : int = None) -> torch.Tensor:
     """
     DeepMind version Speculative Sampling.
     Accelerating Large Language Model Decoding with Speculative Sampling
@@ -102,7 +102,7 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                 # p.logits shape (batch, seq, vocab)
                 q = approx_model(x).logits
                 next_tok = sample(norm_logits(q[:, -1, :], 
-                                  temperature, top_k, top_p))
+                                  temperature, top_k, top_p), random_seed)
                 x = torch.cat((x, next_tok), dim=1)
             
             # normalize the logits
@@ -129,14 +129,14 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                     n += 1
                 else:
                     # reject
-                    t = sample(max_fn(p[:, n, :] - q[:, n, :]))
+                    t = sample(max_fn(p[:, n, :] - q[:, n, :]), random_seed)
                     is_all_accept = False
                     break
          
             prefix = x[:, :n + 1]
             
             if is_all_accept:
-                t = sample(p[:, -1, :])
+                t = sample(p[:, -1, :], random_seed)
             
             prefix = torch.cat((prefix, t), dim=1)
             pbar.update(n - pbar.n)
@@ -146,7 +146,7 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
 @torch.no_grad()
 def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
                          max_len : int , gamma : int = 4,
-                         temperature : float = 1, top_k : int = 0, top_p : float = 0, verbose : bool = False) -> torch.Tensor:
+                         temperature : float = 1, top_k : int = 0, top_p : float = 0, verbose : bool = False, random_seed : int = None) -> torch.Tensor:
     """
     Google version Speculative Sampling.
     https://arxiv.org/pdf/2211.17192.pdf
@@ -178,8 +178,8 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
     if verbose:
         global DECODER
     
-    approx_model_cache = KVCacheModel(approx_model, temperature, top_k, top_p)
-    target_model_cache = KVCacheModel(target_model, temperature, top_k, top_p)
+    approx_model_cache = KVCacheModel(approx_model, temperature, top_k, top_p, random_seed)
+    target_model_cache = KVCacheModel(target_model, temperature, top_k, top_p, random_seed)
     
     torch.manual_seed(123)
     with tqdm(total=T, desc="speculative sampling") as pbar:
@@ -213,7 +213,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             
             if n < prefix_len + gamma - 1:
                 # reject someone, sample from the pos n
-                t = sample(max_fn(target_model_cache._prob_list[:, n, :] - approx_model_cache._prob_list[:, n, :]))
+                t = sample(max_fn(target_model_cache._prob_list[:, n, :] - approx_model_cache._prob_list[:, n, :]), random_seed=random_seed)
                 if verbose:
                     print(f"target resamples at position {n}: \033[34m{DECODER.decode(t)}\033[0m")
                 
@@ -221,7 +221,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             else:
                 # all approx model decoding accepted
                 assert n == target_model_cache._prob_list.shape[1] - 1
-                t = sample(target_model_cache._prob_list[:, -1, :])
+                t = sample(target_model_cache._prob_list[:, -1, :], random_seed=random_seed)
                 if verbose:
                     print(f"target samples {n}: \033[35m{DECODER.decode(t)}\033[0m")
                 target_model_cache.rollback(n+2)
@@ -253,7 +253,6 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ve
 
     top_k = 10
     top_p = 0.9
-
 
     torch.manual_seed(123)
     output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)

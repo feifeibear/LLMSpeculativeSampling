@@ -1,5 +1,6 @@
 import torch
 from utils import norm_logits, sample
+from typing import Optional
 
 def _debug_show_kvcache(past_key_values):
     if  past_key_values is None:
@@ -10,7 +11,7 @@ def _debug_show_kvcache(past_key_values):
         break
 
 class KVCacheModel():
-    def __init__(self, model : torch.nn.Module, temperature : float = 1, top_k : int = 0, top_p : float = 0) -> None:
+    def __init__(self, model : torch.nn.Module, temperature : float = 1, top_k : int = 0, top_p : float = 0, random_seed : Optional[int] = None) -> None:
         self._model = model
         self._past_key_values = None
         self._prob_list = None
@@ -18,6 +19,7 @@ class KVCacheModel():
         self._temperature = temperature
         self._top_k = top_k
         self._top_p = top_p
+        self._random_seed = random_seed
 
     def _forward_with_kvcache(self, input_ids : torch.Tensor, use_debug = True) -> torch.Tensor:
         if self._past_key_values is None:
@@ -77,7 +79,7 @@ class KVCacheModel():
 
         for _ in range(gamma):
             q = self._forward_with_kvcache(x, use_debug)
-            next_tok = sample(q)
+            next_tok = sample(q, random_seed=self._random_seed)
             x = torch.cat((x, next_tok), dim=1)
         return x
 
