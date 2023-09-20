@@ -6,7 +6,7 @@ The speculative sampling is proposed by Google and Deepmind independently. So I 
 
 ## Update Logs
 
-- 2023.09.19: Add KVCache Optimization to the Google's version.
+- 2023.09.19: Add KV Cache Optimization to the Google's version.
 
 - 2023.08.16: First release, implement the paper's algorithm.
 
