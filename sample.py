@@ -4,6 +4,7 @@ import torch
 from torch.nn import functional as F
 import argparse
 from typing import Tuple
+import torch.utils.benchmark as benchmark
 
 class Decoder:
     def __init__(self, tokenizer) -> None:
@@ -85,32 +86,7 @@ def _debug_show_kvcache(past_key_values):
         k, v = elem
         print(f"kv cache: k shape {k.shape}, v shape {v.shape}")
         break
-    
-def trim_kv_cache(past_key_values : Tuple[Tuple[torch.Tensor, torch.Tensor]], q : torch.Tensor, end_pos : int):
-    """
-    trim the KV cache to the end_pos
-
-    Args:
-        past_key_values (Tuple): KV Cache
-        end_pos (int): the position of the valid prefix
-
-    Returns:
-        Tuple: the trimmed KV Cache
-    """
-    past_key_values_trimmed = []
-    for kv in past_key_values:
-        k, v = kv
-        # NOTE() the indexing is specific for bloom. This won't work for other models
-        # For example llama k, v should be (batch, num_head, seq_len, hidden_dim)
-        k = k[:, :, :end_pos]
-        v = v[:, :end_pos, :]
-        kv_trimmed = (k, v)
-        past_key_values_trimmed.append(kv_trimmed)
-    
-    q = q[:, :end_pos, :]
-    return past_key_values_trimmed, q
-        
-    
+   
 def forward_with_kvcache(model, input_ids, past_key_values, cached_q, temperature, top_k, top_p, use_debug = False):
     if past_key_values is None:
         assert cached_q is None
@@ -150,6 +126,97 @@ def forward_with_kvcache(model, input_ids, past_key_values, cached_q, temperatur
     
     return last_q, outputs.past_key_values, cached_q
 
+
+class KVCacheModel():
+    def __init__(self, model, temperature : float = 1, top_k : int = 0, top_p : float = 0) -> None:
+        self._model = model
+        self._past_key_values = None
+        self._prob_list = None
+
+        self._temperature = temperature
+        self._top_k = top_k
+        self._top_p = top_p
+
+    def _forward_with_kvcache(self, input_ids, use_debug = False):
+        if self._past_key_values is None:
+            assert self._prob_list is None
+            # the first forward returns the prompt's logits
+            outputs = self._model(input_ids)
+            self._prob_list = outputs.logits
+            for i in range(self._prob_list.shape[-2]):   
+                self._prob_list[:, i, :] = norm_logits(self._prob_list[:, i, :], self._temperature, self._top_k, self._top_p)
+            last_q = self._prob_list[:, -1, :]
+        else:
+            # return the last token's logits
+            cached_len = 0
+            for kv in self._past_key_values:
+                k, v = kv
+                cached_len = k.shape[2]
+                
+            last_input_id = input_ids[:, cached_len:]
+            if last_input_id.dim() == 1:
+                last_input_id = torch.unsqueeze(last_input_id, 0)
+            
+            if use_debug:
+                print(f"last_input_id shape {last_input_id.shape}")
+                _debug_show_kvcache(self._past_key_values)
+            
+            outputs = self._model(last_input_id, past_key_values=self._past_key_values, use_cache=True)
+            
+            not_cached_q = outputs.logits
+            if not_cached_q.dim() == 2:
+                not_cached_q = torch.unsqueeze(not_cached_q, 0)
+                
+            for i in range(not_cached_q.shape[-2]):   
+                not_cached_q[:, i, :] = norm_logits(not_cached_q[:, i, :], self._temperature, self._top_k, self._top_p)    
+                
+            if self._prob_list is not None:
+                self._prob_list = torch.cat([self._prob_list, not_cached_q], dim=1)
+            last_q = not_cached_q[:, -1, :]
+        
+        return last_q
+
+
+    def _generate_with_kvcache(self, prefix : torch.Tensor, 
+                                    gamma : int, 
+                                    use_debug = False) -> Tuple[torch.Tensor, torch.Tensor, Tuple[Tuple[torch.Tensor, torch.Tensor]]]:
+        """ forward the model gamma times
+
+        Args:
+            prefix (torch.Tensor): the prefix
+            gamma (int): how many times approx guesses
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, Tuple]: prefix+generated tokens, past key value cache, probability distribution of vocab on the all of the tokens
+        """
+        x = prefix
+
+        for _ in range(gamma):
+            q, self._past_key_values, self._prob_list = self._forward_with_kvcache(self._model, x, use_debug)
+            next_tok = sample(q)
+            x = torch.cat((x, next_tok), dim=1)
+        return x
+
+    def generate(self, input : torch.Tensor, gamma : int) -> torch.Tensor:
+        output = self._generate_with_kvcache(input, gamma, self._model)
+        return output
+    
+    def rollback(self, end_pos : int):
+        past_key_values_trimmed = []
+        for kv in self._past_key_values:
+            k, v = kv
+            # NOTE() the indexing is specific for bloom. This won't work for other models
+            # For example llama k, v should be (batch, num_head, seq_len, hidden_dim)
+            k = k[:, :, :end_pos]
+            v = v[:, :end_pos, :]
+            kv_trimmed = (k, v)
+            past_key_values_trimmed.append(kv_trimmed)
+        
+        self._past_key_values = past_key_values_trimmed
+        self._prob_list = self._prob_list[:, :end_pos, :]
+
+
+
 @torch.no_grad()
 def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int, 
                             temperature : float = 1, top_k : int = 0, top_p : float = 0):
@@ -170,8 +237,6 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int,
 
     return x
 
-
-
 def max_fn(x):
     """
         norm(max (x, 0))
@@ -179,40 +244,6 @@ def max_fn(x):
     x_max = torch.where(x > 0, x, torch.zeros_like(x))
     x_max_sum = torch.sum(x_max, dim=1, keepdim=True) 
     return x_max / x_max_sum
-
-    
-def generate_with_kvcache(prefix : torch.Tensor, 
-                                 gamma : int, 
-                                 approx_model : torch.nn.Module,
-                                 temperature : float, 
-                                 top_k : float, 
-                                 top_p : float,
-                                 past_key_values : Tuple[Tuple[torch.Tensor, torch.Tensor]] = None,
-                                 cached_q = None,
-                                 use_debug = False) -> Tuple[torch.Tensor, torch.Tensor, Tuple[Tuple[torch.Tensor, torch.Tensor]]]:
-    """ forward the model gamma times
-
-    Args:
-        prefix (torch.Tensor): the prefix
-        gamma (int): how many times approx guesses
-        approx_model (torch.nn.Module): an approx model
-        temperature (float): temp for sampling
-        top_k (float): top_k for sampling
-        top_p (float): top_p for sampling
-        past_key_values : valid kv cache
-        cached_q: valid probability distribution of vocab on the all of the prefix tokens
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor, Tuple]: prefix+generated tokens, past key value cache, probability distribution of vocab on the all of the tokens
-    """
-    x = prefix
-
-    for _ in range(gamma):
-        q, past_key_values, cached_q = forward_with_kvcache(approx_model, x, past_key_values, cached_q, temperature, top_k, top_p, use_debug)
-        next_tok = sample(q)
-        x = torch.cat((x, next_tok), dim=1)
-    
-    return x, past_key_values, cached_q
 
 @torch.no_grad()
 def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
@@ -322,43 +353,29 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
 
     assert approx_model.device == target_model.device
     
+    device = target_model.device
+    
     if verbose:
         global DECODER
     
-    target_model_past_key_values = None
-    approx_model_past_key_values = None
-    #TODO() we can reduce the volume of q
-    cached_q = None
-    cached_p = None
+    
+    approx_model = KVCacheModel(approx_model, temperature, top_k, top_p)
+    target_model = KVCacheModel(target_model, temperature, top_k, top_p)
+    
     with tqdm(total=T, desc="speculative sampling") as pbar:
         while prefix.shape[1] < T:
             # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
             prefix_len = prefix.shape[1]
 
-            x, approx_model_past_key_values, cached_q = generate_with_kvcache(
-                prefix, gamma, approx_model, 
-                temperature, top_k, top_p, approx_model_past_key_values, cached_q)
-
-            # q (batch_size, prefix_len+gamma, vocab)
-            # assert q.shape[-2] == gamma, f"q.shape {q.shape} dose not match gamma {gamma}"
+            x = approx_model.generate(prefix, gamma)
+            _ = target_model.generate(x, 1)
             
-            # p  = M_p[prefix + x_0, x_0, .., x_(gamma-1)]
-            _, target_model_past_key_values, cached_p = forward_with_kvcache(
-                                       target_model,
-                                       x,
-                                       target_model_past_key_values, cached_p, 
-                                       temperature, top_k, top_p, 
-                                       use_debug=False)
-            
-            # n the end position of the valid prefix
-            # x = x_[:prefix_len-1] + x_0, ... x_(gamma-1)
             n = prefix_len + gamma - 1
             for i in range(gamma):
-                r = torch.rand(1, device = cached_q.device)
+                r = torch.rand(1, device = device)
                 j = x[:, prefix_len + i]
                 
-                # print(f"cached_q {cached_q.shape}, p {cached_p.shape} prefix_len {prefix_len}")
-                if r > (cached_p[:, prefix_len + i - 1, j]) / (cached_q[:, prefix_len + i - 1, j]):
+                if r > (target_model._prob_list[:, prefix_len + i - 1, j]) / (approx_model._prob_list[:, prefix_len + i - 1, j]):
                     # reject
                     n = prefix_len + i - 1
                     break
@@ -369,25 +386,25 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             # print(f"n : {n}, i : {i}, prefix_len + gamma - 1: {prefix_len + gamma - 1}")
             assert n >= prefix_len - 1, f"n {n}, prefix_len {prefix_len}"
             prefix = x[:, :n + 1]
-            approx_model_past_key_values, cached_q = trim_kv_cache(approx_model_past_key_values, cached_q, n+1)
-            assert cached_q.shape[-2] <= n + 1, f"cached_q.shape {cached_q.shape}, n {n}"
+            
+            approx_model.rollback(n+1)
+            
+            assert approx_model._prob_list.shape[-2] <= n + 1, f"approx_model prob list shape {approx_model._prob_list.shape}, n {n}"
             
             if n < prefix_len + gamma - 1:
                 # reject someone, sample from the pos n
-                t = sample(max_fn(cached_p[:, n, :] - cached_q[:, n, :]))
+                t = sample(max_fn(target_model._prob_list[:, n, :] - approx_model._prob_list[:, n, :]))
                 if verbose:
                     print(f"target resamples {n}: \033[34m{DECODER.decode(t)}\033[0m")
                 
-                # target_model_past_key_values = None
-                # cached_p = None
-                target_model_past_key_values, cached_p = trim_kv_cache(target_model_past_key_values, cached_p, n+1)
+                target_model.rollback(n+1)
             else:
                 # all approx model decoding accepted
-                assert n == cached_p.shape[1] - 1
-                t = sample(cached_p[:, -1, :])
+                assert n == target_model._prob_list.shape[1] - 1
+                t = sample(target_model._prob_list[:, -1, :])
                 if verbose:
                     print(f"target samples {n}: \033[35m{DECODER.decode(t)}\033[0m")
-                target_model_past_key_values, cached_p = trim_kv_cache(target_model_past_key_values, cached_p, n+2)
+                target_model.rollback(n+2)
             
             
             prefix = torch.cat((prefix, t), dim=1)
@@ -397,7 +414,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
 
     return prefix
 
-def generate(input_text, approx_model_name, target_model_name, num_tokens=20, verbose = False):
+def generate(input_text, approx_model_name, target_model_name, num_tokens=40, verbose = False):
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
     
     torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -437,8 +454,7 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ve
     output = speculative_sampling(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, verbose = verbose)
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
     print(f"google's speculative_sampling: {generated_text}")
-
-
+    
 if __name__ == "__main__":
     args = parse_arguments()
     generate(args.input, args.approx_model_name, args.target_model_name, verbose=args.verbose)
