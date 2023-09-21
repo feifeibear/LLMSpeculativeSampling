@@ -4,6 +4,7 @@ import argparse
 import contexttimer
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from torch.profiler import ProfilerActivity
 
 from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2
 from globals import Decoder
@@ -33,6 +34,29 @@ def parse_arguments():
     return args
 
 
+def benchmark(fn, print_prefix, use_profiler=True, *args, **kwargs):
+    TEST_TIME = 10
+    profile_filename = f"./profile_logs/{print_prefix}"
+    
+    with contexttimer.Timer() as t:
+        if use_profiler:
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CUDA],
+                schedule=torch.profiler.schedule(wait=0, warmup=1, active=2, repeat=1, skip_first=0),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(profile_filename),
+                record_shapes=False,
+                profile_memory=False,
+                # with_stack=True
+            ) as prof:
+                for _ in range(TEST_TIME): 
+                    output = fn(*args, **kwargs)
+                    prof.step()
+        else:
+            for _ in range(TEST_TIME): 
+                output = fn(*args, **kwargs)
+
+    print(f"\n [benchmark] {print_prefix}, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])} tokens")
+
 def generate(input_text, approx_model_name, target_model_name, num_tokens=40, random_seed = None, verbose = False, use_benchmark = True):
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
     
@@ -59,11 +83,8 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
     
     TEST_TIME = 10
     if use_benchmark:
-        with contexttimer.Timer() as t:
-            for _ in range(TEST_TIME):
-                output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
-        print(f"\n[benchmark] large (target) model autoregressive_sampling 10 times, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])}")
-        
+        benchmark(autoregressive_sampling, "AS_large", True,
+                  input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
 
     torch.manual_seed(123)
     output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
@@ -71,11 +92,8 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
     print(f"small (approx) model autoregressive_sampling: {generated_text}")
     
     if use_benchmark:
-        with contexttimer.Timer() as t:
-            for _ in range(TEST_TIME): 
-                output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
-        print(f"\n[benchmark] small (approx) model autoregressive_sampling 10 times, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])} tokens")
-    
+        benchmark(autoregressive_sampling, "AS_small", True,
+                  input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
     
     torch.manual_seed(123)
     output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
@@ -88,10 +106,8 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
     print(f"google's speculative_sampling: {generated_text}")
     
     if use_benchmark:
-        with contexttimer.Timer() as t:
-            for _ in range(TEST_TIME): 
-                output = speculative_sampling(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
-        print(f"\n[benchmark] speculative_sampling 10 times, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])} tokens")
+        benchmark(speculative_sampling, "SP", True,
+                  input_ids, small_model, large_model, max_len = num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
 
 if __name__ == "__main__":
     args = parse_arguments()
