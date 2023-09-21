@@ -17,18 +17,21 @@ class Decoder:
 
 DECODER : Decoder = None    
 
+# my local models
 MODELZOO = {
     "llama7b": "/share_nfs/tianzhi/code/llama-7b",
     "bloom7b": "/share_nfs/fangjiarui/root/code/hf_models/bloomz-7b1",
     "bloom-560m": "/share_nfs/fangjiarui/root/code/hf_models/bloom-560m",
+    "baichuan-13b": "/share_nfs/duanqiyuan/models/source_models/hf/Baichuan-13B-Base",
+    "baichuan-7b": "/share_nfs/duanqiyuan/models/source_models/hf/baichuan-7B"
 }
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='args for sample.py')
 
     parser.add_argument('--input', type=str, default="Suggest at least five related search terms to \"Mạng neural nhân tạo\".")
-    parser.add_argument('--approx_model_name', type=str, default="/share_nfs/fangjiarui/root/code/hf_models/bloom-560m")
-    parser.add_argument('--target_model_name', type=str, default="/share_nfs/fangjiarui/root/code/hf_models/bloomz-7b1")
+    parser.add_argument('--approx_model_name', type=str, default=MODELZOO["bloom-560m"])
+    parser.add_argument('--target_model_name', type=str, default=MODELZOO["bloom7b"])
     parser.add_argument('--verbose', '-v', action='store_true', default=False, help='enable verbose mode')
     parser.add_argument('--seed', '-s', type=int, default=None, help='set a random seed')
     args = parser.parse_args()
@@ -40,14 +43,14 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
     
     torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
-    tokenizer = AutoTokenizer.from_pretrained(approx_model_name)
+    tokenizer = AutoTokenizer.from_pretrained(approx_model_name, trust_remote_code=True)
     
     global DECODER
     DECODER = Decoder(tokenizer)
     
-    print("begin loading models")
-    small_model = AutoModelForCausalLM.from_pretrained(approx_model_name).to(torch_device)
-    large_model = AutoModelForCausalLM.from_pretrained(target_model_name).to(torch_device)
+    print(f"begin loading models: \n {approx_model_name} \n {target_model_name}")
+    small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, trust_remote_code=True).to(torch_device)
+    large_model = AutoModelForCausalLM.from_pretrained(target_model_name, trust_remote_code=True).to(torch_device)
     print("finish loading models")
     
     input_ids = tokenizer.encode(input_text, return_tensors='pt').to(torch_device)
@@ -89,5 +92,8 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
 
 if __name__ == "__main__":
     args = parse_arguments()
-    # args.approx_model_name = MODELZOO["llama7b"]
+    
+    args.approx_model_name = MODELZOO["baichuan-7b"]
+    args.target_model_name = MODELZOO["baichuan-13b"]
+    
     generate(args.input, args.approx_model_name, args.target_model_name, random_seed = args.seed, verbose=args.verbose)
