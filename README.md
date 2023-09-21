@@ -16,6 +16,14 @@ The speculative sampling is proposed by Google and Deepmind independently. So I 
 ### Inference
 In the sample, I use [bloomz-7b1](https://huggingface.co/bigscience/bloomz-7b1/tree/main) as the target model, [bloom-560m](https://huggingface.co/bigscience/bloom-560m/tree/main) as the approximation model.
 
+Tested Model Pairs
+
+| Approx Model | Target Model |
+|--------------|--------------|
+| [bloomz-7b1](https://huggingface.co/bigscience/bloomz-7b1/tree/main) | [bloom-560m](https://huggingface.co/bigscience/bloom-560m/tree/main) |
+| [TinyLlama-1.1B](https://huggingface.co/PY007/TinyLlama-1.1B-step-50K-105b) | llama-7b |
+
+
 ```bash
 python main.py \
     --input "The quick brown fox jumps over the lazy " \
