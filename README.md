@@ -6,13 +6,23 @@ The speculative sampling is proposed by Google and Deepmind independently. So I 
 
 ## Update Logs
 
+- 2023.09.21: Add serving features. Support more models, i.e. llama-7B and llama-1B.
+
 - 2023.09.19: Add KV Cache Optimization to the Google's version.
 
-- 2023.08.16: First release, implement the paper's algorithm.
+- 2023.08.16: First release, implement the paper's algorithm. Support Bloom-560M and Bloomz-7B1.
 
 ## Usage
 ### Inference
 In the sample, I use [bloomz-7b1](https://huggingface.co/bigscience/bloomz-7b1/tree/main) as the target model, [bloom-560m](https://huggingface.co/bigscience/bloom-560m/tree/main) as the approximation model.
+
+Tested Model Pairs
+
+| Approx Model | Target Model |
+|--------------|--------------|
+| [bloomz-7b1](https://huggingface.co/bigscience/bloomz-7b1/tree/main) | [bloom-560m](https://huggingface.co/bigscience/bloom-560m/tree/main) |
+| [TinyLlama-1.1B](https://huggingface.co/PY007/TinyLlama-1.1B-step-50K-105b) | llama-7b |
+
 
 ```bash
 python main.py \
