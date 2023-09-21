@@ -4,6 +4,7 @@ import torch
 
 from sampling.kvcache_model import KVCacheModel
 from sampling.utils import norm_logits, sample, max_fn
+from globals import Decoder
 
 @torch.no_grad()
 def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
@@ -37,9 +38,6 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
     
     device = target_model.device
     
-    if verbose:
-        global DECODER
-    
     approx_model_cache = KVCacheModel(approx_model, temperature, top_k, top_p, random_seed)
     target_model_cache = KVCacheModel(target_model, temperature, top_k, top_p, random_seed)
     
@@ -62,7 +60,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
                 break
             
             if verbose:
-                print(f"approx guess accepted {j[0]}: \033[31m{DECODER.decode(torch.tensor([j]))}\033[0m")
+                print(f"approx guess accepted {j[0]}: \033[31m{Decoder().decode(torch.tensor([j]))}\033[0m")
         
         # print(f"n : {n}, i : {i}, prefix_len + gamma - 1: {prefix_len + gamma - 1}")
         assert n >= prefix_len - 1, f"n {n}, prefix_len {prefix_len}"
@@ -76,7 +74,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             # reject someone, sample from the pos n
             t = sample(max_fn(target_model_cache._prob_history[:, n, :] - approx_model_cache._prob_history[:, n, :]), random_seed=random_seed)
             if verbose:
-                print(f"target resamples at position {n}: \033[34m{DECODER.decode(t)}\033[0m")
+                print(f"target resamples at position {n}: \033[34m{Decoder().decode(t)}\033[0m")
             
             target_model_cache.rollback(n+1)
         else:
@@ -84,7 +82,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             assert n == target_model_cache._prob_history.shape[1] - 1
             t = sample(target_model_cache._prob_history[:, -1, :], random_seed=random_seed)
             if verbose:
-                print(f"target samples {n}: \033[35m{DECODER.decode(t)}\033[0m")
+                print(f"target samples {n}: \033[35m{Decoder().decode(t)}\033[0m")
             target_model_cache.rollback(n+2)
         
         

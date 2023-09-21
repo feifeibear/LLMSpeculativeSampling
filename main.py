@@ -6,16 +6,7 @@ import contexttimer
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2
-
-class Decoder:
-    def __init__(self, tokenizer) -> None:
-        self.tokenizer = tokenizer
-    
-    def decode(self, t : torch.Tensor) -> str:
-        # assert t.dim == 2, "t must be 2d tensor"
-        return self.tokenizer.decode(t[0], skip_special_tokens=True)
-
-DECODER : Decoder = None    
+from globals import Decoder
 
 # my local models
 MODELZOO = {
@@ -34,8 +25,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='args for main.py')
 
     parser.add_argument('--input', type=str, default="Suggest at least five related search terms to \"Mạng neural nhân tạo\".")
-    parser.add_argument('--approx_model_name', type=str, default=MODELZOO["llama1b"])
-    parser.add_argument('--target_model_name', type=str, default=MODELZOO["llama7b"])
+    parser.add_argument('--approx_model_name', type=str, default=MODELZOO["bloom-560m"])
+    parser.add_argument('--target_model_name', type=str, default=MODELZOO["bloom7b"])
     parser.add_argument('--verbose', '-v', action='store_true', default=False, help='enable verbose mode')
     parser.add_argument('--seed', '-s', type=int, default=None, help='set a random seed')
     args = parser.parse_args()
@@ -48,9 +39,8 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
     torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     tokenizer = AutoTokenizer.from_pretrained(approx_model_name, trust_remote_code=True)
-    
-    global DECODER
-    DECODER = Decoder(tokenizer)
+  
+    Decoder().set_tokenizer(tokenizer)
     
     print(f"begin loading models: \n {approx_model_name} \n {target_model_name}")
     small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, trust_remote_code=True).to(torch_device)
