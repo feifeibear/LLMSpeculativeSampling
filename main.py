@@ -22,6 +22,8 @@ MODELZOO = {
     # https://huggingface.co/PY007/TinyLlama-1.1B-step-50K-105b
     "llama1b": "/share_nfs/fangjiarui/root/code/hf_models/TinyLlama-1.1B-step-50K-105b",
     "llama7b": "/share_nfs/tianzhi/code/llama-7b",
+    # https://huggingface.co/huggyllama/llama-13b
+    "llama13b": None,
     "bloom-560m": "/share_nfs/fangjiarui/root/code/hf_models/bloom-560m",
     "bloom7b": "/share_nfs/fangjiarui/root/code/hf_models/bloomz-7b1",
     "baichuan-7b": "/share_nfs/duanqiyuan/models/source_models/hf/baichuan-7B",
@@ -29,7 +31,7 @@ MODELZOO = {
 }
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description='args for sample.py')
+    parser = argparse.ArgumentParser(description='args for main.py')
 
     parser.add_argument('--input', type=str, default="Suggest at least five related search terms to \"Mạng neural nhân tạo\".")
     parser.add_argument('--approx_model_name', type=str, default=MODELZOO["llama1b"])
@@ -70,7 +72,7 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
         with contexttimer.Timer() as t:
             for _ in range(TEST_TIME):
                 output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
-        print(f"large (target) model autoregressive_sampling 10 times, tokens/sec: {len(output[0] / t.elapsed / TEST_TIME)}")
+        print(f"\n[benchmark] large (target) model autoregressive_sampling 10 times, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])}")
         
 
     torch.manual_seed(123)
@@ -81,8 +83,8 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
     if use_benchmark:
         with contexttimer.Timer() as t:
             for _ in range(TEST_TIME): 
-                output = speculative_sampling(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
-        print(f"small (approx) model autoregressive_sampling 10 times, tokens/sec: {len(output[0] / t.elapsed / TEST_TIME)}")
+                output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
+        print(f"\n[benchmark] small (approx) model autoregressive_sampling 10 times, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])} tokens")
     
     
     torch.manual_seed(123)
@@ -99,7 +101,7 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
         with contexttimer.Timer() as t:
             for _ in range(TEST_TIME): 
                 output = speculative_sampling(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
-        print(f"speculative_sampling 10 times, tokens/sec: {len(output[0] / t.elapsed / TEST_TIME)}")
+        print(f"\n[benchmark] speculative_sampling 10 times, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])} tokens")
 
 if __name__ == "__main__":
     args = parse_arguments()
