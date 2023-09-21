@@ -14,7 +14,7 @@ The speculative sampling is proposed by Google and Deepmind independently. So I 
 In the sample, I use [bloomz-7b1](https://huggingface.co/bigscience/bloomz-7b1/tree/main) as the target model, [bloom-560m](https://huggingface.co/bigscience/bloom-560m/tree/main) as the approximation model.
 
 ```bash
-python sample.py \
+python main.py \
     --input "The quick brown fox jumps over the lazy " \
     --target_model_name bigscience/bloomz-7b1 \
     --approx_model_name bigscience/bloom-560m
