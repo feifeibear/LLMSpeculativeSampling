@@ -1,6 +1,9 @@
 import torch
-from utils import norm_logits, sample
 from typing import Optional
+
+from sampling.utils import norm_logits, sample
+from transformers.models.llama.modeling_llama import LlamaForCausalLM
+from transformers.models.bloom.modeling_bloom import BloomForCausalLM
 
 def _debug_show_kvcache(past_key_values):
     if  past_key_values is None:
@@ -96,10 +99,22 @@ class KVCacheModel():
             k, v = kv
             # NOTE() the indexing is specific for bloom. This won't work for other models
             # For example llama k, v should be (batch, num_head, seq_len, hidden_dim)
-            k = k[:, :, :end_pos]
-            v = v[:, :end_pos, :]
-            kv_trimmed = (k, v)
-            past_key_values_trimmed.append(kv_trimmed)
+            
+            if isinstance(self._model, BloomForCausalLM):
+                # k (batch * head, hidden_dim, seq); v (batch * head, seq, hidden_dim)
+                k = k[:, :, :end_pos]
+                v = v[:, :end_pos, :]
+                kv_trimmed = (k, v)
+                past_key_values_trimmed.append(kv_trimmed)
+            elif isinstance(self._model, LlamaForCausalLM):
+                # k, v (batch, head, seq, hidden_dim)
+                k = k[:, :, :end_pos, :]
+                v = v[:, :, :end_pos, :]
+                kv_trimmed = (k, v)
+                past_key_values_trimmed.append(kv_trimmed)
+            else:
+                # check the model implementation to see the layout of K, V
+                raise TypeError(f"unknown model type {type(self._model)} for KV Cache trim operations")
         
         self._past_key_values = past_key_values_trimmed
         self._prob_history = self._prob_history[:, :end_pos, :]
