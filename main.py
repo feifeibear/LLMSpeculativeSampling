@@ -19,11 +19,13 @@ DECODER : Decoder = None
 
 # my local models
 MODELZOO = {
+    # https://huggingface.co/PY007/TinyLlama-1.1B-step-50K-105b
+    "llama1b": "/share_nfs/fangjiarui/root/code/hf_models/TinyLlama-1.1B-step-50K-105b",
     "llama7b": "/share_nfs/tianzhi/code/llama-7b",
-    "bloom7b": "/share_nfs/fangjiarui/root/code/hf_models/bloomz-7b1",
     "bloom-560m": "/share_nfs/fangjiarui/root/code/hf_models/bloom-560m",
+    "bloom7b": "/share_nfs/fangjiarui/root/code/hf_models/bloomz-7b1",
+    "baichuan-7b": "/share_nfs/duanqiyuan/models/source_models/hf/baichuan-7B",
     "baichuan-13b": "/share_nfs/duanqiyuan/models/source_models/hf/Baichuan-13B-Base",
-    "baichuan-7b": "/share_nfs/duanqiyuan/models/source_models/hf/baichuan-7B"
 }
 
 def parse_arguments():
@@ -93,7 +95,7 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
 if __name__ == "__main__":
     args = parse_arguments()
     
-    args.approx_model_name = MODELZOO["baichuan-7b"]
-    args.target_model_name = MODELZOO["baichuan-13b"]
+    args.approx_model_name = MODELZOO["llama1b"]
+    args.target_model_name = MODELZOO["llama7b"]
     
     generate(args.input, args.approx_model_name, args.target_model_name, random_seed = args.seed, verbose=args.verbose)

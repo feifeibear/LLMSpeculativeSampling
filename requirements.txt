@@ -1,4 +1,4 @@
-transformers==4.29.2
+transformers==4.33.2
 torch==2.0.1
 contexttimer
 flask
