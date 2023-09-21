@@ -104,7 +104,4 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
 if __name__ == "__main__":
     args = parse_arguments()
     
-    args.approx_model_name = MODELZOO["llama1b"]
-    args.target_model_name = MODELZOO["llama7b"]
-    
     generate(args.input, args.approx_model_name, args.target_model_name, random_seed = args.seed, verbose=args.verbose)
