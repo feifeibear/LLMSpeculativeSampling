@@ -15,6 +15,7 @@ def _debug_show_kvcache(past_key_values):
 class KVCacheModel():
     def __init__(self, model : torch.nn.Module, temperature : float = 1, top_k : int = 0, top_p : float = 0, random_seed : Optional[int] = None) -> None:
         self._model = model
+        self._device = model.device
         self._past_key_values = None
         self._prob_history = None
 
@@ -87,7 +88,7 @@ class KVCacheModel():
 
     @torch.no_grad()
     def generate(self, input : torch.Tensor, gamma : int) -> torch.Tensor:
-        output = self._generate_with_kvcache(input, gamma)
+        output = self._generate_with_kvcache(input.to(self._device), gamma)
         return output
     
     @torch.no_grad()
