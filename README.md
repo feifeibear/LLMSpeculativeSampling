@@ -6,9 +6,11 @@ The speculative sampling is proposed by Google and Deepmind independently. So I 
 
 ## Update Logs
 
+- 2023.09.21: Add serving features. Support more models, i.e. llama-7B and llama-1B.
+
 - 2023.09.19: Add KV Cache Optimization to the Google's version.
 
-- 2023.08.16: First release, implement the paper's algorithm.
+- 2023.08.16: First release, implement the paper's algorithm. Support Bloom-560M and Bloomz-7B1.
 
 ## Usage
 ### Inference

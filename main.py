@@ -40,7 +40,7 @@ def parse_arguments():
     return args
 
 
-def generate(input_text, approx_model_name, target_model_name, num_tokens=40, random_seed = None, verbose = False):
+def generate(input_text, approx_model_name, target_model_name, num_tokens=40, random_seed = None, verbose = False, use_benchmark = True):
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
     
     torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -66,16 +66,24 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
     print(f"large (target) model autoregressive_sampling: {generated_text}")
     
     TEST_TIME = 10
-    with contexttimer.Timer() as t:
-        for _ in range(TEST_TIME):
-            output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
-    print(f"large (target) model autoregressive_sampling 10 times, tokens/sec: {len(output[0] / t.elapsed / TEST_TIME)}")
-    
+    if use_benchmark:
+        with contexttimer.Timer() as t:
+            for _ in range(TEST_TIME):
+                output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
+        print(f"large (target) model autoregressive_sampling 10 times, tokens/sec: {len(output[0] / t.elapsed / TEST_TIME)}")
+        
 
     torch.manual_seed(123)
     output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
     print(f"small (approx) model autoregressive_sampling: {generated_text}")
+    
+    if use_benchmark:
+        with contexttimer.Timer() as t:
+            for _ in range(TEST_TIME): 
+                output = speculative_sampling(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
+        print(f"small (approx) model autoregressive_sampling 10 times, tokens/sec: {len(output[0] / t.elapsed / TEST_TIME)}")
+    
     
     torch.manual_seed(123)
     output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
@@ -87,10 +95,11 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
     print(f"google's speculative_sampling: {generated_text}")
     
-    with contexttimer.Timer() as t:
-        for _ in range(TEST_TIME): 
-            output = speculative_sampling(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
-    print(f"speculative_sampling 10 times, tokens/sec: {len(output[0] / t.elapsed / TEST_TIME)}")
+    if use_benchmark:
+        with contexttimer.Timer() as t:
+            for _ in range(TEST_TIME): 
+                output = speculative_sampling(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
+        print(f"speculative_sampling 10 times, tokens/sec: {len(output[0] / t.elapsed / TEST_TIME)}")
 
 if __name__ == "__main__":
     args = parse_arguments()
