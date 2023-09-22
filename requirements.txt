@@ -3,3 +3,4 @@ torch==2.0.1
 contexttimer
 flask
 transformers_stream_generator
+colorama

@@ -15,5 +15,8 @@ class Decoder(metaclass=Singleton):
     def set_tokenizer(self, tokenizer):
         self.tokenizer = tokenizer
 
+    def encode(self, s: str, return_tensors='pt') -> torch.Tensor:
+        return self.tokenizer.encode(s, return_tensors=return_tensors)
+    
     def decode(self, t: torch.Tensor) -> str:
         return self.tokenizer.decode(t[0], skip_special_tokens=True)

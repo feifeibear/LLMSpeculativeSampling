@@ -41,6 +41,10 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
     approx_model_cache = KVCacheModel(approx_model, temperature, top_k, top_p)
     target_model_cache = KVCacheModel(target_model, temperature, top_k, top_p)
     
+    resample_count = 0
+    target_sample_count = 0
+    accepted_count = 0
+    
     while prefix.shape[1] < T:
         # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
         prefix_len = prefix.shape[1]
@@ -64,6 +68,8 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             
             if verbose:
                 print(f"approx guess accepted {j[0]}: \033[31m{Decoder().decode(torch.tensor([j]))}\033[0m")
+
+            accepted_count += 1
         
         # print(f"n : {n}, i : {i}, prefix_len + gamma - 1: {prefix_len + gamma - 1}")
         assert n >= prefix_len - 1, f"n {n}, prefix_len {prefix_len}"
@@ -78,7 +84,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             t = sample(max_fn(target_model_cache._prob_history[:, n, :] - approx_model_cache._prob_history[:, n, :]))
             if verbose:
                 print(f"target resamples at position {n}: \033[34m{Decoder().decode(t)}\033[0m")
-            
+            resample_count += 1
             target_model_cache.rollback(n+1)
         else:
             # all approx model decoding accepted
@@ -86,12 +92,14 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
             t = sample(target_model_cache._prob_history[:, -1, :])
             if verbose:
                 print(f"target samples {n}: \033[35m{Decoder().decode(t)}\033[0m")
+            target_sample_count += 1
             target_model_cache.rollback(n+2)
         
         
         prefix = torch.cat((prefix, t), dim=1)
 
-
+    if verbose:
+        print(f"generated tokens numbers {prefix.shape[-1] - seq_len}, accepted_count {accepted_count}, target_sample_count {target_sample_count}, resample_count {resample_count}")
     return prefix
 
 

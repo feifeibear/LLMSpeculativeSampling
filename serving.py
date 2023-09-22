@@ -55,9 +55,6 @@ def predict():
     return jsonify(result)
 
 if __name__ == '__main__':
-    # Load the model
-    # load_model("/share_nfs/fangjiarui/root/code/hf_models/bloom-560m")
-
     GLOBAL_SERVER = Server(approx_model_name="/share_nfs/fangjiarui/root/code/hf_models/bloom-560m",
            target_model_name="/share_nfs/fangjiarui/root/code/hf_models/bloomz-7b1")
     # Start the Flask service
