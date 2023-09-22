@@ -7,9 +7,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2
 from globals import Decoder
-
-
-
+import json
+from  tqdm import tqdm
 
 # my local models
 MODELZOO = {
@@ -42,34 +41,37 @@ def parse_arguments():
     return args
 
 
-def color_print(text):
-    print(Fore.RED + text + Style.RESET_ALL)
-    
-def benchmark(fn, print_prefix, use_profiler=True, *args, **kwargs):
-    TEST_TIME = 10
-    profile_filename = f"./profile_logs/{print_prefix}"
-    
+def benchmark(fn, info, *args, **kwargs):
+
+    test_sample_num = 5
     with contexttimer.Timer() as t:
-        if use_profiler:
-            with torch.profiler.profile(
-                activities=[torch.profiler.ProfilerActivity.CUDA],
-                schedule=torch.profiler.schedule(wait=0, warmup=1, active=2, repeat=1, skip_first=0),
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(profile_filename),
-                record_shapes=False,
-                profile_memory=False,
-                # with_stack=True
-            ) as prof:
-                for _ in range(TEST_TIME): 
-                    output = fn(*args, **kwargs)
-                    prof.step()
-        else:
-            for _ in range(TEST_TIME): 
-                output = fn(*args, **kwargs)
+        total_tokens = 0
+        with open('/share_nfs/fangjiarui/root/code/datasets/share_gpt.jsonl', 'r') as file:
+            # add tqdm
+            
+            with tqdm(total=test_sample_num, desc=f"{info} benchmarking") as pbar:
+                for line in file.readlines():
+                    data = json.loads(line)
+                    for obj in data:
+                        content = obj["content"]
+                        # print("content", content)
+                        input_ids = Decoder().encode(content, return_tensors='pt').to('cuda')
+                        if len(input_ids[0]) > 2048 :
+                            continue
+                        output_ids = fn(input_ids, *args, **kwargs)
+                        generated_text = Decoder().decode(output_ids)
+                        # print("generated_text", generated_text)
+                        total_tokens += (len(generated_text) - len(input_ids))
+                    test_sample_num -= 1
+                    if test_sample_num < 0:
+                        break
+                    
+                    pbar.update(1)
+                    
+    print(f"\n [benchmark] {info} tokens/sec: {total_tokens / t.elapsed}, {t.elapsed} sec generates {total_tokens} tokens")
 
-    print(f"\n [benchmark] {print_prefix}, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])} tokens")
-
-def generate(input_text, approx_model_name, target_model_name, num_tokens=20, gamma = 4,
-             random_seed = None, verbose = False, use_benchmark = False, use_profiling = False):
+def generate(input_text, approx_model_name, target_model_name, num_tokens=100, gamma = 4,
+             random_seed = None):
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
     
     torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -95,39 +97,15 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
     top_p = 0.9
 
     torch.manual_seed(123)
-    output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    color_print(f"large (target) model autoregressive_sampling: {generated_text}")
-    
-    if use_benchmark:
-        benchmark(autoregressive_sampling, "AS_large", use_profiling,
-                  input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
+    benchmark(autoregressive_sampling, "AS_large", large_model, num_tokens, top_k = top_k, top_p=top_p)
 
     torch.manual_seed(123)
-    output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    color_print(f"small (approx) model autoregressive_sampling: {generated_text}")
-    
-    if use_benchmark:
-        benchmark(autoregressive_sampling, "AS_small", use_profiling,
-                  input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
-    
-    torch.manual_seed(123)
-    output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    color_print(f"deepmind's speculative_sampling: {generated_text}")   
+    benchmark(autoregressive_sampling, "AS_small", small_model, num_tokens, top_k = top_k, top_p=top_p)
 
     torch.manual_seed(123)
-    output = speculative_sampling(input_ids, small_model, large_model, num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed, verbose = verbose)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    color_print(f"google's speculative_sampling: {generated_text}")
-    
-    if use_benchmark:
-        benchmark(speculative_sampling, "SP", use_profiling,
-                  input_ids, small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
+    benchmark(speculative_sampling, "SP", small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
 
 if __name__ == "__main__":
     args = parse_arguments()
     
-    generate(args.input, args.approx_model_name, args.target_model_name, num_tokens=args.max_tokens, gamma=args.gamma,
-             random_seed = args.seed, verbose=args.verbose, use_benchmark = args.benchmark)
+    generate(args.input, args.approx_model_name, args.target_model_name, num_tokens=args.max_tokens, gamma=args.gamma)

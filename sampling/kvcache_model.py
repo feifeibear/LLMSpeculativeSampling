@@ -30,7 +30,6 @@ class KVCacheModel():
             self._prob_history = outputs.logits
             for i in range(self._prob_history.shape[-2]):   
                 self._prob_history[:, i, :] = norm_logits(self._prob_history[:, i, :], self._temperature, self._top_k, self._top_p)
-            # self._prob_history[:, -1, :] = norm_logits(self._prob_history[:, -1, :], self._temperature, self._top_k, self._top_p)
             self._past_key_values = outputs.past_key_values
             last_q = self._prob_history[:, -1, :]
         else:
