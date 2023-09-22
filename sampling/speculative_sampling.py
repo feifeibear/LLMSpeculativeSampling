@@ -38,10 +38,9 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
     
     device = target_model.device
     
-    approx_model_cache = KVCacheModel(approx_model, temperature, top_k, top_p, random_seed)
-    target_model_cache = KVCacheModel(target_model, temperature, top_k, top_p, random_seed)
+    approx_model_cache = KVCacheModel(approx_model, temperature, top_k, top_p)
+    target_model_cache = KVCacheModel(target_model, temperature, top_k, top_p)
     
-    torch.manual_seed(123)
     while prefix.shape[1] < T:
         # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
         prefix_len = prefix.shape[1]
@@ -50,7 +49,11 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
         _ = target_model_cache.generate(x, 1)
         
         n = prefix_len + gamma - 1
+        
+
         for i in range(gamma):
+            if random_seed:
+                torch.manual_seed(random_seed)
             r = torch.rand(1, device = device)
             j = x[:, prefix_len + i]
             
@@ -72,7 +75,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
         
         if n < prefix_len + gamma - 1:
             # reject someone, sample from the pos n
-            t = sample(max_fn(target_model_cache._prob_history[:, n, :] - approx_model_cache._prob_history[:, n, :]), random_seed=random_seed)
+            t = sample(max_fn(target_model_cache._prob_history[:, n, :] - approx_model_cache._prob_history[:, n, :]))
             if verbose:
                 print(f"target resamples at position {n}: \033[34m{Decoder().decode(t)}\033[0m")
             
@@ -80,7 +83,7 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
         else:
             # all approx model decoding accepted
             assert n == target_model_cache._prob_history.shape[1] - 1
-            t = sample(target_model_cache._prob_history[:, -1, :], random_seed=random_seed)
+            t = sample(target_model_cache._prob_history[:, -1, :])
             if verbose:
                 print(f"target samples {n}: \033[35m{Decoder().decode(t)}\033[0m")
             target_model_cache.rollback(n+2)
@@ -129,7 +132,7 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                 # p.logits shape (batch, seq, vocab)
                 q = approx_model(x).logits
                 next_tok = sample(norm_logits(q[:, -1, :], 
-                                  temperature, top_k, top_p), random_seed = random_seed)
+                                  temperature, top_k, top_p))
                 x = torch.cat((x, next_tok), dim=1)
             
             # normalize the logits
@@ -148,6 +151,8 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
             is_all_accept = True
             n = prefix_len - 1
             for i in range(gamma):
+                if random_seed:
+                    torch.manual_seed(random_seed)
                 r = torch.rand(1, device = p.device)
                 j = x[:, prefix_len + i]
                 
@@ -156,14 +161,14 @@ def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Modul
                     n += 1
                 else:
                     # reject
-                    t = sample(max_fn(p[:, n, :] - q[:, n, :]), random_seed = random_seed)
+                    t = sample(max_fn(p[:, n, :] - q[:, n, :]))
                     is_all_accept = False
                     break
          
             prefix = x[:, :n + 1]
             
             if is_all_accept:
-                t = sample(p[:, -1, :], random_seed = random_seed)
+                t = sample(p[:, -1, :])
             
             prefix = torch.cat((prefix, t), dim=1)
             pbar.update(n - pbar.n)

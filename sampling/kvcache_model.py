@@ -13,7 +13,7 @@ def _debug_show_kvcache(past_key_values):
         break
 
 class KVCacheModel():
-    def __init__(self, model : torch.nn.Module, temperature : float = 1, top_k : int = 0, top_p : float = 0, random_seed : Optional[int] = None) -> None:
+    def __init__(self, model : torch.nn.Module, temperature : float = 1, top_k : int = 0, top_p : float = 0) -> None:
         self._model = model
         self._past_key_values = None
         self._prob_history = None
@@ -21,16 +21,16 @@ class KVCacheModel():
         self._temperature = temperature
         self._top_k = top_k
         self._top_p = top_p
-        self._random_seed = random_seed
 
     def _forward_with_kvcache(self, input_ids : torch.Tensor, use_debug = True) -> torch.Tensor:
         if self._past_key_values is None:
             assert self._prob_history is None, f"{self._prob_history.shape}"
-            # the first forward returns the prompt's logits
+            # the first forward (prefill) returns the prompt's logits
             outputs = self._model(input_ids)
             self._prob_history = outputs.logits
             for i in range(self._prob_history.shape[-2]):   
                 self._prob_history[:, i, :] = norm_logits(self._prob_history[:, i, :], self._temperature, self._top_k, self._top_p)
+            # self._prob_history[:, -1, :] = norm_logits(self._prob_history[:, -1, :], self._temperature, self._top_k, self._top_p)
             self._past_key_values = outputs.past_key_values
             last_q = self._prob_history[:, -1, :]
         else:
@@ -81,7 +81,7 @@ class KVCacheModel():
 
         for _ in range(gamma):
             q = self._forward_with_kvcache(x, use_debug)
-            next_tok = sample(q, random_seed=self._random_seed)
+            next_tok = sample(q)
             x = torch.cat((x, next_tok), dim=1)
         return x
 

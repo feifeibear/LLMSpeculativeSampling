@@ -57,7 +57,7 @@ def benchmark(fn, print_prefix, use_profiler=True, *args, **kwargs):
 
     print(f"\n [benchmark] {print_prefix}, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])} tokens")
 
-def generate(input_text, approx_model_name, target_model_name, num_tokens=40, random_seed = None, verbose = False, use_benchmark = True):
+def generate(input_text, approx_model_name, target_model_name, num_tokens=40, random_seed = None, verbose = False, use_benchmark = False):
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
     
     torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -67,13 +67,19 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=40, ra
     Decoder().set_tokenizer(tokenizer)
     
     print(f"begin loading models: \n {approx_model_name} \n {target_model_name}")
-    small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, trust_remote_code=True).to(torch_device)
-    large_model = AutoModelForCausalLM.from_pretrained(target_model_name, trust_remote_code=True).to(torch_device)
+    small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, 
+                                                       torch_dtype=torch.float16,
+                                                       device_map="auto",
+                                                       trust_remote_code=True)
+    large_model = AutoModelForCausalLM.from_pretrained(target_model_name, 
+                                                       torch_dtype=torch.float16,
+                                                       device_map="auto",
+                                                       trust_remote_code=True)
     print("finish loading models")
     
     input_ids = tokenizer.encode(input_text, return_tensors='pt').to(torch_device)
 
-    top_k = 10
+    top_k = 20
     top_p = 0.9
 
     torch.manual_seed(123)
