@@ -29,7 +29,7 @@ MODELZOO = {
 def parse_arguments():
     parser = argparse.ArgumentParser(description='args for main.py')
 
-    parser.add_argument('--input', type=str, default="Suggest at least five related search terms to \"Mạng neural nhân tạo\".")
+    parser.add_argument('--input', type=str, default="Any recommendations for my holidays in Abu Dhabi?")
     parser.add_argument('--approx_model_name', type=str, default=MODELZOO["llama2-7b"])
     parser.add_argument('--target_model_name', type=str, default=MODELZOO["llama2-70b"])
     parser.add_argument('--verbose', '-v', action='store_true', default=False, help='enable verbose mode')
