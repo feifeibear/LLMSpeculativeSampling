@@ -144,15 +144,6 @@ def speculative_sampling_v2(prefix: torch.Tensor, approx_model: torch.nn.Module,
         mask[-1, :] = torch.ones_like(x)
         return x_batch.to(x.device), mask.to(x.device)
 
-    def check_tensor(tensor):
-        if torch.any(torch.isnan(tensor)):
-            return False
-        if torch.any(torch.isinf(tensor)):
-            return False
-        if torch.any(tensor < 0):
-            return False
-        return True
-
     seq_len = prefix.shape[1]
     T = seq_len + max_len
 
