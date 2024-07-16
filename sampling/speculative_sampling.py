@@ -132,8 +132,9 @@ def speculative_sampling_v2(prefix: torch.Tensor, approx_model: torch.nn.Module,
     """
 
     def batch_padding(x, gamma):
-        PADDING_CODE = 32000
-        # The padding token in alpaca is 32000. This code should changed with different models.
+        PADDING_CODE = 2
+        # The padding token in alpaca is 32000. For some models they don't have padding code.
+        # An alt way is set is as eos_token_id which is generally 2. This code should changed with different models.
 
         x_batch = torch.ones((gamma + 1, x.shape[1]), dtype=x.dtype) * PADDING_CODE
         mask = torch.zeros_like(x_batch, dtype=x.dtype)
