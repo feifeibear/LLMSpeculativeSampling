@@ -6,6 +6,20 @@ from sampling.kvcache_model import KVCacheModel
 from sampling.utils import norm_logits, sample, max_fn
 from globals import Decoder
 
+def batch_padding(x, gamma):
+    try: 
+        pad = Decoder().tokenizer.pad_token_id
+    except:
+        # In case some models do not have padding token
+        pad = Decoder().tokenizer.eos_token_id
+
+    x_batch = torch.ones((gamma, x.shape[1]-1), 
+                        dtype=x.dtype) * pad
+    for i in range(gamma-1):
+        x_batch[i, gamma-i-1:] = x[:, :i-gamma]
+    x_batch[-1, :] = x[:, :-1]
+    return x_batch.to(x.device)
+
 
 @torch.no_grad()
 def speculative_sampling(prefix: torch.Tensor, approx_model: torch.nn.Module, target_model: torch.nn.Module,
@@ -130,20 +144,6 @@ def speculative_sampling_v2(prefix: torch.Tensor, approx_model: torch.nn.Module,
     Returns:
         torch.Tensor: generated tokens (batch, target_seqlen)
     """
-
-    def batch_padding(x, gamma):
-        PADDING_CODE = 2
-        # The padding token in alpaca is 32000. For some models they don't have padding code.
-        # An alt way is set it as eos_token_id which is generally 2. This code should changed with different models.
-
-        x_batch = torch.ones((gamma + 1, x.shape[1]), dtype=x.dtype) * PADDING_CODE
-        mask = torch.zeros_like(x_batch, dtype=x.dtype)
-        for i in range(gamma):
-            x_batch[i, gamma - i:] = x[:, :i - gamma]
-            mask[i, gamma - i:] = torch.ones_like(x[:, :i - gamma])
-        x_batch[-1, :] = x
-        mask[-1, :] = torch.ones_like(x)
-        return x_batch.to(x.device), mask.to(x.device)
 
     seq_len = prefix.shape[1]
     T = seq_len + max_len
