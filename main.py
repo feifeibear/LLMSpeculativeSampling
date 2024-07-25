@@ -5,7 +5,7 @@ import contexttimer
 from colorama import Fore, Style
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2
+from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2, speculative_sampling_sfliu
 from globals import Decoder
 
 
@@ -113,9 +113,9 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
                   input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
     
     torch.manual_seed(123)
-    output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
+    output = speculative_sampling_sfliu(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    color_print(f"deepmind's speculative_sampling: {generated_text}")   
+    color_print(f"deepmind's speculative_sampling by sfliu: {generated_text}")   
 
     torch.manual_seed(123)
     output = speculative_sampling(input_ids, small_model, large_model, num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed, verbose = verbose)

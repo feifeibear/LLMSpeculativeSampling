@@ -8,22 +8,23 @@ from globals import Decoder
 
 def batch_padding(x, gamma):
     try: 
-        pad = Decoder().tokenizer.pad_token_id
+        pad_id = Decoder().tokenizer.pad_token_id
     except:
         # In case some models do not have padding token
-        pad = Decoder().tokenizer.eos_token_id
-    
-    if pad is None:
-        pad = 0
+        pad_id = Decoder().tokenizer.eos_token_id
+ 
+    if pad_id is None:
+        pad_id = 0
 
     x_batch = torch.ones((gamma, x.shape[1]-1), 
-                        dtype=x.dtype) * pad
+                        dtype=x.dtype) * pad_id
     for i in range(gamma-1):
         x_batch[i, gamma-i-1:] = x[:, :i-gamma]
     x_batch[-1, :] = x[:, :-1]
     return x_batch.to(x.device)
 
 
+# the google version of speculative sampling, using kv cache.
 @torch.no_grad()
 def speculative_sampling(prefix: torch.Tensor, approx_model: torch.nn.Module, target_model: torch.nn.Module,
                          max_len: int, gamma: int = 4,
@@ -123,8 +124,93 @@ def speculative_sampling(prefix: torch.Tensor, approx_model: torch.nn.Module, ta
     return prefix
 
 
+
+# This the deepmind version of speculative sampling, it produces the same result as the google version. not using kvcache.
 @torch.no_grad()
-def speculative_sampling_v2(prefix: torch.Tensor, approx_model: torch.nn.Module, target_model: torch.nn.Module,
+def speculative_sampling_v2(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
+                         max_len : int , gamma : int = 4,
+                         temperature : float = 1, top_k : int = 0, top_p : float = 0, random_seed : int = None) -> torch.Tensor:
+    """
+    DeepMind version Speculative Sampling.
+    Accelerating Large Language Model Decoding with Speculative Sampling
+    https://arxiv.org/abs/2302.01318
+    No KV Cache Optimization
+    
+    Args:
+        x (torch.Tensor): input sequence, (batch, prefix_seqlen), Note that the batch dim is always 1 now.
+        approx_model (torch.nn.Module): approx model, the small one
+        target_model (torch.nn.Module): target model, the large one
+        max_len (int): the max overall generated tokens number.
+        gamma (int): $\gamma$, the token number small model guesses.
+        temperature (float, optional): Defaults to 1.
+        top_k (int, optional): Defaults to 0.
+        top_p (float, optional): Defaults to 0.
+
+    Returns:
+        torch.Tensor: generated tokens (batch, target_seqlen)
+    """
+    seq_len = prefix.shape[1]
+    T = seq_len + max_len
+    
+    assert prefix.shape[0] == 1, "input batch size must be 1"
+
+    with tqdm(total=T, desc="speculative sampling") as pbar:
+        while prefix.shape[1] < T:
+            # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
+            x = prefix
+            prefix_len = prefix.shape[1]
+            for _ in range(gamma):
+                # p.logits shape (batch, seq, vocab)
+                q = approx_model(x).logits
+                next_tok = sample(norm_logits(q[:, -1, :], 
+                                  temperature, top_k, top_p))
+                x = torch.cat((x, next_tok), dim=1)
+            
+            # normalize the logits
+            for i in range(q.shape[1]):
+                q[:,i,:] = norm_logits(q[:,i,:],
+                                temperature, top_k, top_p)
+            # p  = M_p[prefix + x_0, x_0, .., x_(gamma-1)]
+            p = target_model(x).logits
+            for i in range(p.shape[1]):
+                p[:,i,:] = norm_logits(p[:,i,:],
+                                temperature, top_k, top_p)
+
+            # n the end position of the valid prefix
+            # x = x_[:prefix_len-1] + x_0, ... x_(gamma-1)
+            
+            is_all_accept = True
+            n = prefix_len - 1
+            for i in range(gamma):
+                if random_seed:
+                    torch.manual_seed(random_seed)
+                r = torch.rand(1, device = p.device)
+                j = x[:, prefix_len + i]
+                
+                if r < torch.min(torch.tensor([1], device=q.device), p[:, prefix_len + i - 1, j] / q[:, prefix_len + i - 1, j]):
+                    # accept, and update n
+                    n += 1
+                else:
+                    # reject
+                    t = sample(max_fn(p[:, n, :] - q[:, n, :]))
+                    is_all_accept = False
+                    break
+         
+            prefix = x[:, :n + 1]
+            
+            if is_all_accept:
+                t = sample(p[:, -1, :])
+            
+            prefix = torch.cat((prefix, t), dim=1)
+            pbar.update(n - pbar.n)
+
+    return prefix
+
+
+# This is the implement of deepmind version by sf-Liu (github id: https://github.com/sf-Liu), which have a different understanding of the paper.
+# https://github.com/feifeibear/LLMSpeculativeSampling/issues/29
+@torch.no_grad()
+def speculative_sampling_sfliu(prefix: torch.Tensor, approx_model: torch.nn.Module, target_model: torch.nn.Module,
                             max_len: int, gamma: int = 4,
                             temperature: float = 1, top_k: int = 0, top_p: float = 0,
                             random_seed: int = None) -> torch.Tensor:
