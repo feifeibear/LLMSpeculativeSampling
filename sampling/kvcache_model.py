@@ -1,5 +1,6 @@
 import torch
 from typing import Optional
+from transformers.cache_utils import DynamicCache
 
 from sampling.utils import norm_logits, sample
 from transformers.models.bloom.modeling_bloom import BloomForCausalLM
@@ -33,6 +34,18 @@ class KVCacheModel():
             self._past_key_values = outputs.past_key_values
             last_q = self._prob_history[:, -1, :]
         else:
+            if isinstance(self._past_key_values, DynamicCache):
+                cached_len = self._past_key_values.get_seq_length()
+            else:
+                cached_len = 0
+                for kv in self._past_key_values:
+                    k, v = kv
+                    cached_len = k.shape[2]  # For Bloom
+                    if k.dim() == 3:  # Handle standard (batch, heads, seq_len, dim) format
+                        cached_len = k.shape[2]
+                    else:
+                        cached_len = k.shape[-2]
+                    break
             # return the last token's logits
             cached_len = 0
             for kv in self._past_key_values:
@@ -90,28 +103,28 @@ class KVCacheModel():
         return output
     
     @torch.no_grad()
-    def rollback(self, end_pos : int):
-        past_key_values_trimmed = []
-        assert self._past_key_values
-        for kv in self._past_key_values:
-            k, v = kv
-            # NOTE() the indexing is specific for bloom. This won't work for other models
-            # For example llama k, v should be (batch, num_head, seq_len, hidden_dim)
-            
-            # Bloom is special one
-            if isinstance(self._model, BloomForCausalLM):
-                # k (batch * head, hidden_dim, seq); v (batch * head, seq, hidden_dim)
-                k = k[:, :, :end_pos]
-                v = v[:, :end_pos, :]
-                kv_trimmed = (k, v)
-                past_key_values_trimmed.append(kv_trimmed)
-            else:
-                # k, v (batch, head, seq, hidden_dim)
-                k = k[:, :, :end_pos, :]
-                v = v[:, :, :end_pos, :]
-                kv_trimmed = (k, v)
-                past_key_values_trimmed.append(kv_trimmed)
+    def rollback(self, end_pos: int):
+        if isinstance(self._past_key_values, DynamicCache):
+            # Truncate DynamicCache
+            new_cache = DynamicCache()
+            for layer_idx in range(len(self._past_key_values.key_cache)):
+                k = self._past_key_values.key_cache[layer_idx][..., :end_pos, :]
+                v = self._past_key_values.value_cache[layer_idx][..., :end_pos, :]
+                new_cache.key_cache.append(k)
+                new_cache.value_cache.append(v)
+            self._past_key_values = new_cache
+        else:
+            # Original tuple-based handling
+            past_key_values_trimmed = []
+            for kv in self._past_key_values:
+                k, v = kv
+                if isinstance(self._model, BloomForCausalLM):
+                    k = k[:, :, :end_pos]
+                    v = v[:, :end_pos, :]
+                else:
+                    k = k[..., :end_pos, :]
+                    v = v[..., :end_pos, :]
+                past_key_values_trimmed.append((k, v))
+            self._past_key_values = past_key_values_trimmed
         
-        self._past_key_values = past_key_values_trimmed
         self._prob_history = self._prob_history[:, :end_pos, :]
-
